@@ -16,19 +16,22 @@ desktop app and terminal alike):
 
 ## Wiring
 
-`.mcp.json` in the project you run Claude Code from:
+`.mcp.json` in the project you run Claude Code from — with cadview
+installed as a package (any venv/uv layout):
 
 ```json
 {
     "mcpServers": {
         "cadview": {
-            "command": "node",
-            "args": ["/path/to/cadview/cadview/plugin/server.mjs"],
-            "env": { "CADVIEW_PROJECT": "my-project" }
+            "command": "uv",
+            "args": ["run", "python", "-m", "cadview.mcp"]
         }
     }
 }
 ```
+
+(Or `"command": "node", "args": ["/path/to/cadview/cadview/plugin/server.mjs"]`
+from a checkout. Needs node on PATH either way.)
 
 `CADVIEW_URL` defaults to `http://127.0.0.1:3941`; `CADVIEW_PROJECT`
 defaults to the directory Claude was launched from, which matches the
