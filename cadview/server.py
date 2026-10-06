@@ -677,7 +677,28 @@ async def _broadcast_run(app, project, event):
     await broadcast(app, project, json.dumps({"type": "run", "project": project, **event}))
 
 
+# every CAD process this server spawns (watch re-runs, manifest builds)
+# goes through one gate — a 30-file merge must not fork a kernel per
+# watched scene on a shared box — and runs niced so the desk stays usable
+BUILD_JOBS = int(os.environ.get("CADVIEW_BUILD_JOBS", 0)) or max(1, min(4, (os.cpu_count() or 2) // 3))
+BUILD_NICE = int(os.environ.get("CADVIEW_NICE", "10"))
+
+
+def _nice():
+    try:
+        os.nice(BUILD_NICE)
+    except (OSError, AttributeError):
+        pass
+
+
 async def _run_module(app, project, path: Path):
+    app["queued"].add(project)
+    async with app["build_gate"]:
+        app["queued"].discard(project)
+        return await _run_module_now(app, project, path)
+
+
+async def _run_module_now(app, project, path: Path):
     started = time.time()
     await _broadcast_run(app, project, {"status": "start", "path": path.name})
     # CADVIEW_SOURCE: the stamp must be THIS script even when it runpy's
@@ -685,7 +706,8 @@ async def _run_module(app, project, path: Path):
     proc = await asyncio.create_subprocess_exec(
         CAD_PYTHON, str(path), cwd=str(path.parent),
         env={**os.environ, "CADVIEW_SCENE": project, "CADVIEW_SOURCE": str(path)},
-        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT)
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
+        preexec_fn=_nice if os.name == "posix" else None)
     try:
         out, _ = await asyncio.wait_for(proc.communicate(), timeout=RUN_TIMEOUT)
         ok, tail = proc.returncode == 0, out.decode(errors="replace").strip().splitlines()[-4:]
@@ -832,49 +854,60 @@ async def _watch_loop(app, project, path: Path):
     save burst = one rebuild), and with no viewer on the project the scene
     is only marked dirty — the rebuild fires when someone next opens it."""
     root = _repo_root(path)
-
-    SKIP = {".git", ".venv", "venv", "node_modules", "__pycache__", ".cache", "exports"}
-
-    def snap():
-        # source only: a clone's .venv holds the whole CAD stack (tens of
-        # thousands of .py), build outputs change on every run
-        out = {}
-        n = 0
-        for dirpath, dirnames, filenames in os.walk(root):
-            dirnames[:] = [d for d in dirnames if d not in SKIP and not d.startswith(".")]
-            for name in filenames:
-                if not name.endswith(".py"):
-                    continue
-                n += 1
-                if n > 20000:
-                    return out
-                try:
-                    out[os.path.join(dirpath, name)] = os.stat(os.path.join(dirpath, name)).st_mtime_ns
-                except OSError:
-                    pass
-        return out
-
-    last = await asyncio.to_thread(snap)
+    last = await asyncio.to_thread(_tree_snapshot, root)
     pending = False
     while True:
-        await asyncio.sleep(1.5)
+        await asyncio.sleep(WATCH_INTERVAL)
         try:
-            cur = await asyncio.to_thread(snap)
+            cur = await asyncio.to_thread(_tree_snapshot, root)
             if cur != last:
                 last = cur
                 pending = True          # keep waiting for a quiet interval
                 continue
             if not pending:
                 continue
-            pending = False
             if not _has_viewers(app, project):
                 app["dirty"].add(project)
+                pending = False
                 continue
-            _spawn_run(app, project, path)   # its push rewrites no *.py
+            # already running (an older edit): stay pending and run once
+            # more when it finishes, so the result reflects the newest edit
+            if _spawn_run(app, project, path):   # its push rewrites no *.py
+                pending = False
         except asyncio.CancelledError:
             raise
         except Exception:
             log.exception("watch loop for %s", project)
+
+
+WATCH_INTERVAL = float(os.environ.get("CADVIEW_WATCH_INTERVAL", "2"))
+_SKIP_DIRS = {".git", ".venv", "venv", "node_modules", "__pycache__", ".cache", "exports"}
+_scan_cache = {}        # repo root -> (time, {path: mtime_ns}); one walk per interval per repo
+
+
+def _tree_snapshot(root: Path):
+    """mtimes of the source *.py under a repo — a .venv holds the whole CAD
+    stack and build outputs change on every run, so neither is looked at.
+    Shared by every watcher on that repo (a dozen scenes = one walk)."""
+    hit = _scan_cache.get(root)
+    if hit and time.monotonic() - hit[0] < WATCH_INTERVAL * 0.75:
+        return hit[1]
+    out = {}
+    n = 0
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d not in _SKIP_DIRS and not d.startswith(".")]
+        for name in filenames:
+            if not name.endswith(".py"):
+                continue
+            n += 1
+            if n > 20000:
+                break
+            try:
+                out[os.path.join(dirpath, name)] = os.stat(os.path.join(dirpath, name)).st_mtime_ns
+            except OSError:
+                pass
+    _scan_cache[root] = (time.monotonic(), out)
+    return out
 
 
 def _ensure_watch(app, project, path: Path):
@@ -911,21 +944,14 @@ async def _start_watchers(app):
         task.add_done_callback(app["run_tasks"].discard)
 
 
-# first-start builds run a few at a time — OCP is single-threaded per
-# process, so a laptop's cores are otherwise idle — but never one per
-# design: a fresh clone must not fork ten CAD kernels at once
-BUILD_JOBS = int(os.environ.get("CADVIEW_BUILD_JOBS", 0)) or max(1, min(4, (os.cpu_count() or 2) // 3))
-
-
 async def _build_manifest(app, todo):
-    gate = asyncio.Semaphore(BUILD_JOBS)
-
+    # first-start builds go through the same gate as everything else:
+    # BUILD_JOBS at a time (cores/3 on a laptop — OCP is single-threaded
+    # per process — or CADVIEW_BUILD_JOBS=1 on a shared box)
     async def one(scene, p):
-        async with gate:
-            lock = app["run_locks"].setdefault(scene, asyncio.Lock())
-            async with lock:
-                app["queued"].discard(scene)
-                await _run_module(app, scene, p)
+        lock = app["run_locks"].setdefault(scene, asyncio.Lock())
+        async with lock:
+            await _run_module(app, scene, p)
 
     await asyncio.gather(*(one(scene, p) for scene, p in todo), return_exceptions=True)
 
@@ -1451,7 +1477,8 @@ def make_app() -> web.Application:
     app["snapshots"] = {}           # snapshot id -> Future[png bytes]
     app["renderers"] = set()        # gallery sockets: snapshot requests only
     app["helpers"] = set()          # hidden-frame sockets: never asked to render
-    app["queued"] = set()           # manifest designs waiting for their first build
+    app["queued"] = set()           # designs waiting for the build gate
+    app["build_gate"] = asyncio.Semaphore(BUILD_JOBS)   # CAD processes at once
     app["selections"] = {}          # project -> current viewer selection
     app["geom_cache"] = {}          # (project, revision) -> nodes/instance boxes
     app.on_startup.append(_start_watchers)
