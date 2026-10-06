@@ -283,6 +283,14 @@ async def handle_lite(request):
     URLs at /static/lite/ — a static-host deployment needs no injection
     because the files sit next to each other there."""
     project_of(request)
+    # with a TLS listener configured, upgrade page loads to it — embedded
+    # browser panes only run scripts on secure origins. Loopback is exempt
+    # (the cert names the public host, not 127.0.0.1).
+    if (os.environ.get("CADVIEW_TLS_CERT") and request.scheme == "http"
+            and _peer(request) not in ("127.0.0.1", "::1")):
+        host = request.host.rsplit(":", 1)[0]
+        port = os.environ.get("CADVIEW_TLS_PORT", "3943")
+        raise web.HTTPTemporaryRedirect(f"https://{host}:{port}{request.path_qs}")
     lite_dir = STATIC_DIR / "lite"
     stamp = str(max(int(p.stat().st_mtime) for p in lite_dir.glob("*")
                     if p.is_file()))
