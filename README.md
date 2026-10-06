@@ -1,12 +1,22 @@
 # cadview
 
 Live browser viewer for [build123d](https://github.com/gumyr/build123d) /
-CadQuery — a drop-in `show()`. Push from any script; every open tab
-updates. Parts tree, face/object selection with world-space measurements,
-named animation clips with a collision check, one-click video recording —
-and an MCP tool so coding agents can read what you've selected.
+CadQuery — a drop-in `show()` for OCP CAD Viewer / ocp_vscode users.
 
 ![cadview](docs/ui.png)
+
+Same call, plus:
+
+- **Persistent** — scenes live on the server, disk-backed with revision
+  history: reopen a browser anytime, nothing to re-run
+- **Faster viewer** — ~3× quicker scene builds, keeps rendering in
+  background windows; `quality="preview"` while iterating
+- **Animations** — named clips from plain keyframe tracks, collision-checked
+  as they play, ⏺ records straight to video
+- **Agent-native** — Claude Code reads your selection ("make these 5 mm
+  taller"), part positions, and verifies animations headlessly
+- **Multi-scene, multi-device** — every design on one server, live on
+  desktop and phone alike
 
 ## Install
 
