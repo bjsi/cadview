@@ -4,7 +4,7 @@ Deliberately CAD-free — no OCP/build123d imports — so it starts in well unde
 second and never version-couples to the CAD stack. Scenes arrive pre-tessellated
 from cadview.client as three-cad-viewer JSON.
 
-    python -m cadview.server [--host 0.0.0.0] [--port 3941]
+    python -m cadview.server [--host H] [--port 3941]
 
 Scenes survive restarts via ~/.local/share/cadview/scene-<project>.json.gz.
 
@@ -1108,7 +1108,7 @@ def make_app() -> web.Application:
 
 def main():
     parser = argparse.ArgumentParser(description="cadview server")
-    parser.add_argument("--host", default=os.environ.get("CADVIEW_BIND", "0.0.0.0"))
+    parser.add_argument("--host", default=os.environ.get("CADVIEW_BIND", "127.0.0.1"))
     parser.add_argument("--port", type=int,
                         default=int(os.environ.get("CADVIEW_PORT", "3941")))
     args = parser.parse_args()
