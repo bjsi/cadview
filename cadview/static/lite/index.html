@@ -201,12 +201,41 @@ live updates, without one this is still a full viewer; (3) install is a URL.
         <button id="anim-rec" title="record this clip as a video"><svg viewBox="0 0 24 24" width="14" height="14"><circle cx="12" cy="12" r="7" fill="currentColor"/></svg></button>
     </div>
     <div id="tray" hidden></div>
+    <script>
+        // boot telemetry: embedded panes have no devtools, so startup
+        // failures beacon back to the server (same origin, gated)
+        (function () {
+            var errs = [];
+            function send(kind, msg) {
+                try {
+                    navigator.sendBeacon("/api/boot-error",
+                        JSON.stringify({ kind: kind, msg: String(msg).slice(0, 500),
+                                         ua: navigator.userAgent.slice(0, 200),
+                                         gl: (function () { try { var c = document.createElement("canvas");
+                                             return !!(c.getContext("webgl2") || c.getContext("webgl")); }
+                                             catch (e) { return "throw:" + e.message; } })() }));
+                } catch (e) { }
+            }
+            window.__bootErrs = errs;
+            window.addEventListener("error", function (e) {
+                errs.push(e.message || e.type);
+                send("error", (e.filename || "") + ": " + (e.message || e.type));
+            }, true);
+            window.addEventListener("unhandledrejection", function (e) {
+                errs.push(String(e.reason));
+                send("rejection", e.reason);
+            });
+            window.__bootSend = send;
+        })();
+    </script>
     <script type="module" src="./lite.js"></script>
     <script>
         // if the module never boots (no WebGL, embedded webview, blocked
         // modules), say so instead of sitting on "loading…" forever
         setTimeout(function () {
             if (!window.cadviewLite) {
+                window.__bootSend("watchdog", "module never booted; errs=" +
+                    JSON.stringify(window.__bootErrs));
                 var el = document.getElementById("empty");
                 el.hidden = false;
                 el.textContent = "The viewer couldn't start in this browser " +

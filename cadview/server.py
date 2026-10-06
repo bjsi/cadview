@@ -684,6 +684,16 @@ async def handle_watch(request):
 # terminal/desktop session — the agent reads the selection via GET
 # /api/selection or the cadview MCP tool (plain MCP, no channels preview).
 
+async def handle_boot_error(request):
+    """Startup-failure beacons from environments with no devtools (embedded
+    panes) — log-only, so the fix can target the real exception."""
+    body = (await request.read())[:2000]
+    peer = _peer(request)
+    log.warning("BOOT-ERROR from %s(%s): %s", DEVICE_LABELS.get(peer, peer), peer,
+                body.decode(errors="replace"))
+    return web.json_response({"ok": True})
+
+
 async def handle_selection_post(request):
     _reject_cross_site(request, require_json=True)
     project = project_of(request, allow_none=False)
@@ -1091,6 +1101,7 @@ def make_app() -> web.Application:
     app.router.add_get("/api/history", handle_history)
     app.router.add_get("/ws", handle_ws)
     app.router.add_static("/static", STATIC_DIR)
+    app.router.add_post("/api/boot-error", handle_boot_error)
     app.router.add_get("/api/parts", handle_parts)
     app.router.add_post("/api/clearance", handle_clearance)
     app.router.add_get("/api/selection", handle_selection_get)
