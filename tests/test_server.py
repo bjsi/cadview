@@ -27,6 +27,13 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
         for p in reversed(self.patches): p.stop()
         self.tmp.cleanup()
 
+    async def test_running_cadview_recognises_a_live_server_only(self):
+        # `cadview` started twice (terminal + desktop preview) must park on
+        # the first instead of failing — the probe is what decides that
+        port = self.client.port
+        self.assertTrue(await asyncio.to_thread(server.running_cadview, '127.0.0.1', port))
+        self.assertFalse(await asyncio.to_thread(server.running_cadview, '127.0.0.1', 1))
+
     async def push(self, width=10, project='demo'):
         resp = await self.client.post('/api/scene?name='+project, json=box_scene(width))
         self.assertEqual(resp.status, 200, await resp.text())

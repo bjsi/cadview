@@ -67,12 +67,22 @@ the arrays get unwieldy — see `docs/DETAILS.md`.
 
 ## With Claude Code
 
-Run your session with the viewer open in the in-app browser and add the
-selection tool to your project's `.mcp.json`:
+In the desktop app, make the viewer your project's preview server — the
+Browser pane then starts it and opens the gallery by itself
+(`.claude/launch.json`; `cadview` is idempotent on its port, so a viewer
+already running in a terminal is reused):
+
+```json
+{ "version": "0.0.1", "configurations": [
+    { "name": "cadview", "runtimeExecutable": "python", "runtimeArgs": ["-m", "cadview.server"],
+      "port": 3941, "autoPort": false } ] }
+```
+
+Add the selection tool to your project's `.mcp.json`:
 
 ```json
 { "mcpServers": { "cadview": {
-    "command": "node", "args": ["/path/to/cadview/cadview/plugin/server.mjs"] } } }
+    "command": "python", "args": ["-m", "cadview.mcp"] } } }
 ```
 
 Select geometry on the page, then just say "make these 5 mm taller" — the

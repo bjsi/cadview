@@ -14,6 +14,7 @@ scene only, http://host:3941/ shows whatever was pushed last, any project.
 """
 
 import argparse
+import errno
 import array
 import asyncio
 import base64
@@ -1152,6 +1153,18 @@ def make_app() -> web.Application:
     return app
 
 
+def running_cadview(host, port):
+    """True when a cadview server already answers on host:port."""
+    import urllib.request
+    probe = f"http://{'127.0.0.1' if host in ('0.0.0.0', '') else host}:{port}/api/runnable"
+    try:
+        with urllib.request.urlopen(probe, timeout=2) as r:
+            return r.headers.get("Content-Type", "").startswith("application/json") \
+                and "projects" in json.load(r)
+    except Exception:
+        return False
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--host", default=os.environ.get("CADVIEW_BIND", "127.0.0.1"))
@@ -1174,7 +1187,15 @@ def main():
         app = make_app()
         runner = web.AppRunner(app, access_log=access)
         await runner.setup()
-        await web.TCPSite(runner, args.host, args.port).start()
+        try:
+            await web.TCPSite(runner, args.host, args.port).start()
+        except OSError as e:
+            # a second `cadview` (another terminal, the Claude desktop app's
+            # preview server) must not fail: park on the one already serving
+            if e.errno != errno.EADDRINUSE or not running_cadview(args.host, args.port):
+                raise
+            log.info("cadview already serving http://%s:%d — using it", args.host, args.port)
+            await asyncio.Event().wait()
         urls = [f"http://{args.host}:{args.port}"]
         if args.tls_cert and args.tls_key:
             import ssl
