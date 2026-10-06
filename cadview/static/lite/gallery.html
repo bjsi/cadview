@@ -17,7 +17,12 @@
             padding: 0 16px; background: rgba(59, 66, 82, 0.9); color: #eceff4;
             font: 14px system-ui, sans-serif; outline: none; }
         #q::placeholder { color: #8b93a3; }
-        #grid { display: grid; gap: 14px; padding: 12px 18px 24px;
+        #groups { padding: 4px 18px 24px; }
+        .ghead { font-size: 12.5px; font-weight: 650; color: #8b93a3;
+            text-transform: uppercase; letter-spacing: 0.06em;
+            margin: 18px 2px 10px; }
+        .ghead .n { font-weight: 400; margin-left: 6px; }
+        .grid { display: grid; gap: 14px;
             grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); }
         .card { background: rgba(37, 44, 58, 0.8); border-radius: 12px;
             overflow: hidden; cursor: pointer; text-decoration: none; color: inherit;
@@ -41,50 +46,75 @@
         <h1>cadview</h1>
         <input id="q" type="search" placeholder="search designs…" autofocus />
     </header>
-    <div id="grid"></div>
+    <div id="groups"></div>
     <div id="none">nothing matches</div>
     <script>
         const PH = '<svg class="ph" width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.3 7 12 12 20.7 7"/><line x1="12" y1="22" x2="12" y2="12"/></svg>';
         let rows = [];
-        const grid = document.getElementById("grid");
+        const groupsEl = document.getElementById("groups");
         const none = document.getElementById("none");
         const q = document.getElementById("q");
 
+        function card(r) {
+            const a = document.createElement("a");
+            a.className = "card";
+            a.href = "/" + encodeURIComponent(r.project);
+            const im = document.createElement("div");
+            im.className = "im";
+            const img = document.createElement("img");
+            img.loading = "lazy";
+            img.src = `/thumbs/${encodeURIComponent(r.project)}.png?v=${encodeURIComponent(r.received_at || "")}`;
+            img.onerror = () => { img.remove(); im.innerHTML = PH; };
+            im.append(img);
+            const meta = document.createElement("div");
+            meta.className = "meta";
+            const t = document.createElement("div");
+            t.className = "t";
+            t.textContent = r.title || r.name || r.project;
+            const s = document.createElement("div");
+            s.className = "s";
+            const when = (r.received_at || "").replace("T", " ").replace(/:\d\d[+-].*$/, "");
+            s.textContent = [r.project, when].filter(Boolean).join(" · ");
+            meta.append(t, s);
+            a.append(im, meta);
+            return a;
+        }
+
         function render() {
+            // one section per project folder — a fresh clone's server shows
+            // exactly its own designs; multi-repo servers get headers
             const needle = q.value.trim().toLowerCase();
-            grid.textContent = "";
-            let shown = 0;
+            groupsEl.textContent = "";
+            const byGroup = new Map();
             for (const r of rows) {
                 const hay = `${r.title || ""} ${r.name || ""} ${r.project} ${r.group || ""}`.toLowerCase();
                 if (needle && !hay.includes(needle)) continue;
-                shown++;
-                const a = document.createElement("a");
-                a.className = "card";
-                a.href = "/" + encodeURIComponent(r.project);
-                const im = document.createElement("div");
-                im.className = "im";
-                const img = document.createElement("img");
-                img.loading = "lazy";
-                img.src = `/thumbs/${encodeURIComponent(r.project)}.png?v=${encodeURIComponent(r.received_at || "")}`;
-                img.onerror = () => { img.remove(); im.innerHTML = PH; };
-                im.append(img);
-                const meta = document.createElement("div");
-                meta.className = "meta";
-                const t = document.createElement("div");
-                t.className = "t";
-                t.textContent = r.title || r.name || r.project;
-                const s = document.createElement("div");
-                s.className = "s";
-                const when = (r.received_at || "").replace("T", " ").replace(/:\d\d[+-].*$/, "");
-                s.textContent = [r.project, when].filter(Boolean).join(" · ");
-                meta.append(t, s);
-                a.append(im, meta);
-                grid.append(a);
+                const g = r.group || r.project;
+                if (!byGroup.has(g)) byGroup.set(g, []);
+                byGroup.get(g).push(r);
             }
-            none.style.display = shown ? "none" : "block";
+            const groups = [...byGroup.entries()]
+                .sort((a, b) => (b[1][0].received_at || "").localeCompare(a[1][0].received_at || ""));
+            for (const [g, list] of groups) {
+                if (groups.length > 1 || needle) {
+                    const head = document.createElement("div");
+                    head.className = "ghead";
+                    head.textContent = g;
+                    const n = document.createElement("span");
+                    n.className = "n";
+                    n.textContent = String(list.length);
+                    head.append(n);
+                    groupsEl.append(head);
+                }
+                const grid = document.createElement("div");
+                grid.className = "grid";
+                for (const r of list) grid.append(card(r));
+                groupsEl.append(grid);
+            }
+            none.style.display = groups.length ? "none" : "block";
         }
 
-        q.addEventListener("input", render);
+                q.addEventListener("input", render);
         fetch("/api/runnable", { cache: "no-store" })
             .then((r) => r.json())
             .then((d) => { rows = d.projects || []; render(); })
