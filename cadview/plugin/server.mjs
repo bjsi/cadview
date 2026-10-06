@@ -50,6 +50,24 @@ const TOOLS = [
         },
     },
     {
+        name: "cadview_snapshot",
+        description: "A rendered PNG of a scene straight from the viewer, WITHOUT touching the page the user " +
+            "is looking at (it renders in a hidden frame of an open cadview page). Use it to look at a design " +
+            "or check your own change — never navigate the user's browser pane for that. view: iso (default) | " +
+            "top | bottom | front | back | left | right; focus: part id/label/path suffix to frame (comma list); " +
+            "hide / only: parts to hide / keep (same selectors); zoom: >1 closer; for animated scenes clip + t " +
+            "(seconds) pose the clip at a time. w/h pixels (default 1200x800).",
+        inputSchema: {
+            type: "object",
+            properties: {
+                project: { type: "string", description: `scene name (default: ${DEFAULT_PROJECT})` },
+                view: { type: "string" }, focus: { type: "string" }, hide: { type: "string" },
+                only: { type: "string" }, zoom: { type: "number" }, t: { type: "number" },
+                clip: { description: "clip name or index" }, w: { type: "number" }, h: { type: "number" },
+            },
+        },
+    },
+    {
         name: "cadview_clearance",
         description: "Replay animation tracks against the scene's coarse AABBs and report NEW collisions " +
             "(pairs already touching at rest are baseline; parts moving rigidly together are skipped). " +
@@ -87,6 +105,17 @@ async function callTool(name, args) {
                                  { signal: AbortSignal.timeout(20000) });
         if (!resp.ok) throw new Error("cadview server said HTTP " + resp.status);
         return JSON.stringify(await resp.json(), null, 1);
+    }
+    if (name === "cadview_snapshot") {
+        const project = args.project || DEFAULT_PROJECT;
+        const q = new URLSearchParams({ name: project });
+        for (const k of ["view", "focus", "hide", "only", "zoom", "t", "clip", "w", "h"])
+            if (args[k] != null && args[k] !== "") q.set(k, String(args[k]));
+        const resp = await fetch(`${URL_BASE}/api/snapshot?${q}`, { signal: AbortSignal.timeout(70000) });
+        if (!resp.ok) throw new Error("cadview server said HTTP " + resp.status + ": " + await resp.text());
+        const data = Buffer.from(await resp.arrayBuffer()).toString("base64");
+        return [{ type: "image", data, mimeType: "image/png" },
+                { type: "text", text: `${project} — ${args.view || "iso"}${args.focus ? " focus " + args.focus : ""}` }];
     }
     if (name === "cadview_clearance") {
         const body = { ...args, project: args.project || DEFAULT_PROJECT };
@@ -126,14 +155,16 @@ async function handle(msg) {
                 "('this face', 'these parts', 'the selected one'), call cadview_selection — " +
                 "they picked the referent in the 3D viewer. cadview_parts gives every part's " +
                 "world bbox (anchors for animation tracks); after authoring tracks, verify " +
-                "them with cadview_clearance. Measurements are world-space mm.",
+                "them with cadview_clearance. To LOOK at a design or your change, call " +
+                "cadview_snapshot — it renders off-screen; never navigate the user's browser " +
+                "pane to check your own work. Measurements are world-space mm.",
         });
     } else if (method === "tools/list") {
         reply(id, { tools: TOOLS });
     } else if (method === "tools/call") {
         try {
-            const text = await callTool(params.name, params.arguments || {});
-            reply(id, { content: [{ type: "text", text }] });
+            const r = await callTool(params.name, params.arguments || {});
+            reply(id, { content: Array.isArray(r) ? r : [{ type: "text", text: r }] });
         } catch (e) {
             reply(id, { content: [{ type: "text", text: "failed: " + e.message }], isError: true });
         }

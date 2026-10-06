@@ -107,6 +107,37 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
             (root / 'widget.py').write_text('print(2)\n')
             self.assertTrue(server._sources_changed_since(head))
 
+    async def test_snapshot_is_rendered_by_an_open_page_never_a_helper_frame(self):
+        await self.push(project='demo')
+        # nothing open -> tell the agent what to do, don't hang
+        self.assertEqual((await self.client.get('/api/snapshot?name=demo')).status, 503)
+        self.assertEqual((await self.client.get('/api/snapshot?name=nope')).status, 404)
+        helper = await self.client.ws_connect('/ws?scene=demo&helper=1')
+        self.assertEqual((await self.client.get('/api/snapshot?name=demo')).status, 503)
+        page = await self.client.ws_connect('/ws?role=renderer')     # a gallery page
+        getting = asyncio.create_task(self.client.get('/api/snapshot?name=demo&view=top&focus=box&w=640'))
+        for _ in range(5):
+            msg = json.loads((await asyncio.wait_for(page.receive(), 5)).data)
+            if msg['type'] == 'snapshot':
+                break
+        self.assertEqual(msg['name'], 'demo')
+        self.assertEqual(msg['params'], {'view': 'top', 'focus': 'box', 'w': '640'})
+        png = b'\x89PNG\r\n\x1a\n' + b'fake'
+        bad = await self.client.post('/api/snapshot?id=' + msg['id'], data=b'not a png')
+        self.assertEqual(bad.status, 400)
+        ok = await self.client.post('/api/snapshot?id=' + msg['id'], data=png)
+        self.assertEqual(ok.status, 200)
+        resp = await asyncio.wait_for(getting, 5)
+        self.assertEqual(resp.status, 200)
+        self.assertEqual(resp.headers['Content-Type'], 'image/png')
+        self.assertEqual(await resp.read(), png)
+        # a renderer page never receives scene data on a push
+        await self.push(width=12, project='demo')
+        with self.assertRaises(asyncio.TimeoutError):
+            await asyncio.wait_for(page.receive(), 0.5)
+        await helper.close()
+        await page.close()
+
     def test_client_scene_name_comes_from_the_nearest_manifest(self):
         from cadview import client
         root = Path(self.tmp.name) / 'repo'

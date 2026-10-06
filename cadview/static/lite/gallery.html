@@ -185,6 +185,39 @@
             nextThumb();
         }
 
+        // ---- snapshots for agents: the server asks this open page to render a
+        // scene in a hidden frame (GET /api/snapshot) — nothing visible changes
+        function renderSnapshot(msg) {
+            const params = new URLSearchParams({ snap: msg.id, ...(msg.params || {}) });
+            const f = document.createElement("iframe");
+            const w = +msg.params?.w || 1200, h = +msg.params?.h || 800;
+            f.style.cssText = `position:fixed;left:-${w + 100}px;top:0;width:${w}px;height:${h}px;border:0;visibility:hidden`;
+            f.src = "./" + encodeURIComponent(msg.name) + "?" + params;
+            const done = (e) => {
+                if (e.data?.cadviewSnapDone !== msg.id) return;
+                f.remove();
+                window.removeEventListener("message", done);
+            };
+            window.addEventListener("message", done);
+            setTimeout(() => { f.remove(); window.removeEventListener("message", done); }, 60000);
+            document.body.append(f);
+        }
+        let listening = false;
+        function listen() {
+            if (staticMode) return;
+            listening = true;
+            let ws;
+            try {
+                ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws?role=renderer`);
+            } catch { return; }
+            ws.onmessage = (e) => {
+                let m;
+                try { m = JSON.parse(e.data); } catch { return; }
+                if (m.type === "snapshot") renderSnapshot(m);
+            };
+            ws.onclose = () => setTimeout(listen, 3000);
+        }
+
         // ---- data: a live server lists scenes; a static site bakes scenes.json
         async function load() {
             let d = null;
@@ -202,6 +235,7 @@
                 if (!rows.length) { none.textContent = "no server reachable"; none.style.display = "block"; }
                 return;
             }
+            if (!listening) listen();
             const json = JSON.stringify(d.projects || []);
             if (json !== lastJson) {
                 lastJson = json;

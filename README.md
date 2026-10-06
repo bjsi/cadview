@@ -90,9 +90,11 @@ agent's `cadview_selection` tool returns exactly what you picked, with
 measurements. Agents without MCP can `GET /api/selection?name=<project>`.
 
 The Browser pane is the person's: an agent should not navigate it to check
-its own work. To look at a scene without touching the page, fetch
-`GET /thumbs/<project>.png` (an 800 px render, refreshed every time a
-page shows the scene) or `GET /api/parts?name=<project>` for positions.
+its own work. `cadview_snapshot` (or `GET /api/snapshot?name=<project>
+&view=top&focus=<part>&hide=<parts>&t=<s>`) returns a PNG rendered in a
+hidden frame of whatever cadview page is open — any view, any part framed,
+any animation time — and the page the person is looking at never changes.
+`GET /api/parts?name=<project>` gives positions without a picture.
 
 ## More
 

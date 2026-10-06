@@ -963,6 +963,67 @@ async def handle_thumb_post(request):
     return web.json_response({"ok": True})
 
 
+# ---- snapshots: an agent's eyes, without touching anyone's page ----------
+# GET /api/snapshot?name=<scene>[&view=iso|top|bottom|front|back|left|right]
+#     [&w=1200&h=800][&hide=a,b][&only=a,b][&focus=part][&zoom=1.5][&t=2.5][&clip=open]
+# The server has no GPU and no browser; any open cadview page has both. One
+# such page (never a hidden helper frame) is asked to load the scene in a
+# hidden frame of its own, pose the camera, and POST the PNG back — the same
+# path the gallery uses for thumbnails. The page the person is looking at is
+# never changed. No page open anywhere -> 503 with the fix.
+SNAP_TIMEOUT = int(os.environ.get("CADVIEW_SNAPSHOT_TIMEOUT", "40"))
+SNAP_PARAMS = ("view", "w", "h", "hide", "only", "focus", "zoom", "t", "clip")
+
+
+async def handle_snapshot_get(request):
+    project = request.query.get("name", "")
+    if not PROJECT_RE.fullmatch(project):
+        raise web.HTTPBadRequest(text="bad name")
+    if project not in request.app["store"].meta:
+        raise web.HTTPNotFound(text="no such scene")
+    params = {k: request.query[k][:200] for k in SNAP_PARAMS if k in request.query}
+    sid = uuid.uuid4().hex
+    fut = asyncio.get_running_loop().create_future()
+    request.app["snapshots"][sid] = fut
+    try:
+        ask = json.dumps({"type": "snapshot", "id": sid, "name": project, "params": params})
+        # newest pages first (they run the current shell), gallery pages
+        # before scene pages; ask a couple so one stale or busy page can't
+        # stall the agent — the first PNG back wins, the rest are dropped
+        pages = [ws for ws in request.app["websockets"] if ws not in request.app["helpers"]]
+        pages.sort(key=lambda ws: ws in request.app["renderers"], reverse=True)
+        asked = 0
+        for ws in sorted(pages[::-1], key=lambda ws: ws not in request.app["renderers"])[:3]:
+            try:
+                await asyncio.wait_for(ws.send_str(ask), timeout=5)
+                asked += 1
+            except (ConnectionError, RuntimeError, asyncio.TimeoutError):
+                continue
+        if not asked:
+            raise web.HTTPServiceUnavailable(
+                text="no cadview page is open to render — open the gallery (/) or any scene page in a browser once")
+        try:
+            png = await asyncio.wait_for(fut, timeout=SNAP_TIMEOUT)
+        except asyncio.TimeoutError:
+            raise web.HTTPGatewayTimeout(text="the open page did not render in time")
+    finally:
+        request.app["snapshots"].pop(sid, None)
+    return web.Response(body=png, content_type="image/png", headers={"Cache-Control": "no-store"})
+
+
+async def handle_snapshot_post(request):
+    _reject_cross_site(request)
+    fut = request.app["snapshots"].get(request.query.get("id", ""))
+    body = await request.read()
+    if fut is None:
+        raise web.HTTPNotFound(text="unknown or expired snapshot")
+    if body[:8] != b"\x89PNG\r\n\x1a\n" or len(body) > 12_000_000:
+        raise web.HTTPBadRequest(text="want a PNG")
+    if not fut.done():
+        fut.set_result(body)
+    return web.json_response({"ok": True})
+
+
 async def handle_gallery(request):
     _tls_redirect(request)
     text = (STATIC_DIR / "lite" / "gallery.html").read_text()
@@ -1314,7 +1375,7 @@ async def broadcast(app, project: str, text: str, meta=None) -> int:
             asyncio.create_task(ws.close())
             return 0
     return sum(await asyncio.gather(*(send(ws) for ws, scope in list(app["websockets"].items())
-                                      if scope is None or scope == project)))
+                                      if (scope is None or scope == project) and ws not in app["renderers"])))
 
 
 async def handle_ws(request):
@@ -1334,14 +1395,23 @@ async def handle_ws(request):
             if p:
                 log.info("dirty %s: rebuilding for new viewer", scope)
                 _spawn_run(request.app, scope, p)
+        # role=renderer: a gallery page — gets snapshot requests only, never
+        # scene data; helper=1: a hidden frame — never asked to render
+        renderer = request.query.get("role") == "renderer"
         async with request.app["scene_lock"]:
             request.app["websockets"][ws] = scope
+            if renderer:
+                request.app["renderers"].add(ws)
+            if request.query.get("helper"):
+                request.app["helpers"].add(ws)
             if request.query.get("updates") == "revision":
                 request.app["revision_sockets"].add(ws)
             store = request.app["store"]
-            text = store.get(scope)
+            text = None if renderer else store.get(scope)
             meta = store.meta.get(scope or store.latest, {})
-            if text is not None and request.query.get("revision") != meta.get("revision"):
+            if renderer:
+                pass
+            elif text is not None and request.query.get("revision") != meta.get("revision"):
                 if ws in request.app["revision_sockets"]:
                     await ws.send_json({"type": "revision", "meta": {k: v for k, v in meta.items() if k != "part_fingerprints"}})
                 else:
@@ -1354,6 +1424,8 @@ async def handle_ws(request):
             # viewers don't need to send anything; ignore chatter
     finally:
         request.app["revision_sockets"].discard(ws)
+        request.app["renderers"].discard(ws)
+        request.app["helpers"].discard(ws)
         request.app["websockets"].pop(ws, None)
         log.info("viewer %s disconnected (%d left)", peer, len(request.app["websockets"]))
     return ws
@@ -1376,6 +1448,9 @@ def make_app() -> web.Application:
     app["watchers"] = {}            # project -> watch task (default-on)
     app["dirty"] = set()            # changed while unviewed -> rebuild on open
     app["last_run"] = {}            # project -> last run event (status, tail)
+    app["snapshots"] = {}           # snapshot id -> Future[png bytes]
+    app["renderers"] = set()        # gallery sockets: snapshot requests only
+    app["helpers"] = set()          # hidden-frame sockets: never asked to render
     app["queued"] = set()           # manifest designs waiting for their first build
     app["selections"] = {}          # project -> current viewer selection
     app["geom_cache"] = {}          # (project, revision) -> nodes/instance boxes
@@ -1392,6 +1467,8 @@ def make_app() -> web.Application:
     (DATA_DIR / "thumbs").mkdir(parents=True, exist_ok=True)
     app.router.add_static("/thumbs", DATA_DIR / "thumbs")
     app.router.add_post("/api/thumb", handle_thumb_post)
+    app.router.add_get("/api/snapshot", handle_snapshot_get)
+    app.router.add_post("/api/snapshot", handle_snapshot_post)
     app.router.add_post("/api/boot-error", handle_boot_error)
     app.router.add_get("/api/parts", handle_parts)
     app.router.add_post("/api/clearance", handle_clearance)
