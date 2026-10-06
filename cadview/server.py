@@ -1118,19 +1118,39 @@ def make_app() -> web.Application:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="cadview server")
+    parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--host", default=os.environ.get("CADVIEW_BIND", "127.0.0.1"))
     parser.add_argument("--port", type=int,
                         default=int(os.environ.get("CADVIEW_PORT", "3941")))
+    # optional HTTPS listener alongside HTTP — some embedded browsers only
+    # run scripts on secure origins. Any cert works (mkcert, LetsEncrypt,
+    # your mesh's cert tool); provisioning belongs to deployment, not here.
+    parser.add_argument("--tls-cert", default=os.environ.get("CADVIEW_TLS_CERT"))
+    parser.add_argument("--tls-key", default=os.environ.get("CADVIEW_TLS_KEY"))
+    parser.add_argument("--tls-port", type=int,
+                        default=int(os.environ.get("CADVIEW_TLS_PORT", "3943")))
     args = parser.parse_args()
+    logging.basicConfig(level=logging.INFO,
+                        format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    access = (logging.getLogger("cadview.access")
+              if os.environ.get("CADVIEW_ACCESS_LOG") else None)
 
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-    )
-    log.info("cadview server on http://%s:%d (cache: %s)", args.host, args.port, DATA_DIR)
-    web.run_app(make_app(), host=args.host, port=args.port,
-                access_log=None, print=None)
+    async def run():
+        app = make_app()
+        runner = web.AppRunner(app, access_log=access)
+        await runner.setup()
+        await web.TCPSite(runner, args.host, args.port).start()
+        urls = [f"http://{args.host}:{args.port}"]
+        if args.tls_cert and args.tls_key:
+            import ssl
+            ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            ctx.load_cert_chain(args.tls_cert, args.tls_key)
+            await web.TCPSite(runner, args.host, args.tls_port, ssl_context=ctx).start()
+            urls.append(f"https://{args.host}:{args.tls_port}")
+        log.info("cadview server on %s (cache: %s)", " + ".join(urls), DATA_DIR)
+        await asyncio.Event().wait()
+
+    asyncio.run(run())
 
 
 if __name__ == "__main__":

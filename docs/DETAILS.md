@@ -117,4 +117,8 @@ python -m cadview.server [--host H] [--port P]     # default 127.0.0.1:3941
 Deployment knobs are environment variables, all optional: `CADVIEW_PEERS`
 (extra allowed client IPs beyond loopback), `CADVIEW_CAD_PYTHON` (a separate
 interpreter with the CAD stack, if the server runs CAD-free),
-`CADVIEW_RUN_ROOTS`, `CADVIEW_DATA`, `CADVIEW_DEVICE_LABELS`, `CADVIEW_HOME_ALIAS`, `CADVIEW_AUTOREG_PEERS`.
+`CADVIEW_RUN_ROOTS`, `CADVIEW_DATA`, `CADVIEW_DEVICE_LABELS`,
+`CADVIEW_HOME_ALIAS`, `CADVIEW_AUTOREG_PEERS`; `CADVIEW_TLS_CERT` /
+`CADVIEW_TLS_KEY` / `CADVIEW_TLS_PORT` add an HTTPS listener alongside
+HTTP (some embedded browsers only run scripts on secure origins — bring
+any cert: mkcert, LetsEncrypt, your mesh's tool).
