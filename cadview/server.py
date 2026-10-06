@@ -743,19 +743,28 @@ async def _start_watchers(app):
     if todo:
         app["queued"].update(scene for scene, _ in todo)
         log.info("manifest: building %s", ", ".join(scene for scene, _ in todo))
-        task = asyncio.create_task(_build_serially(app, todo))
+        task = asyncio.create_task(_build_manifest(app, todo))
         app["run_tasks"].add(task)
         task.add_done_callback(app["run_tasks"].discard)
 
 
-async def _build_serially(app, todo):
-    # one CAD process at a time: a fresh clone's first start must not fork
-    # ten OCP kernels on a laptop
-    for scene, p in todo:
-        lock = app["run_locks"].setdefault(scene, asyncio.Lock())
-        async with lock:
-            app["queued"].discard(scene)
-            await _run_module(app, scene, p)
+# first-start builds run a few at a time — OCP is single-threaded per
+# process, so a laptop's cores are otherwise idle — but never one per
+# design: a fresh clone must not fork ten CAD kernels at once
+BUILD_JOBS = int(os.environ.get("CADVIEW_BUILD_JOBS", 0)) or max(1, min(4, (os.cpu_count() or 2) // 3))
+
+
+async def _build_manifest(app, todo):
+    gate = asyncio.Semaphore(BUILD_JOBS)
+
+    async def one(scene, p):
+        async with gate:
+            lock = app["run_locks"].setdefault(scene, asyncio.Lock())
+            async with lock:
+                app["queued"].discard(scene)
+                await _run_module(app, scene, p)
+
+    await asyncio.gather(*(one(scene, p) for scene, p in todo), return_exceptions=True)
 
 
 async def handle_watch(request):
