@@ -245,7 +245,9 @@ function sendThumb() {
     thumbTimer = setTimeout(() => {
         try {
             const c = renderer.domElement;
-            const w = 480, h = Math.max(1, Math.round(480 * c.height / c.width));
+            // 800 wide: a gallery card AND something an agent can inspect
+            // (GET /thumbs/<scene>.png) without touching the person's page
+            const w = 800, h = Math.max(1, Math.round(800 * c.height / c.width));
             const o = document.createElement("canvas");
             o.width = w; o.height = h;
             const g = o.getContext("2d");

@@ -957,7 +957,7 @@ async def handle_thumb_post(request):
     _reject_cross_site(request)
     project = project_of(request, allow_none=False)
     body = await request.read()
-    if not body[:8] == b"\x89PNG\r\n\x1a\n" or len(body) > 400_000:
+    if not body[:8] == b"\x89PNG\r\n\x1a\n" or len(body) > 1_000_000:
         raise web.HTTPBadRequest(text="want a PNG under 400KB")
     await asyncio.to_thread(atomic_write, DATA_DIR / "thumbs" / f"{project}.png", body)
     return web.json_response({"ok": True})
