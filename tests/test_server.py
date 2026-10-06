@@ -67,6 +67,44 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
             self.app['store'].meta['widget']['source_file'] = str(helper)
             self.assertEqual(server._module_for(self.app['store'], 'widget'), root / 'parts' / 'widget.py')
 
+    async def test_prebuilt_bundle_seeds_unbuilt_designs_and_git_decides_rebuild(self):
+        import gzip, io, subprocess, tarfile
+        root = Path(self.tmp.name) / 'repo'
+        root.mkdir()
+        (root / 'widget.py').write_text('print(1)\n')
+        bundle = Path(self.tmp.name) / 'cadview-scenes.tar.gz'
+        buf = io.BytesIO()
+        with tarfile.open(fileobj=buf, mode='w:gz') as tar:
+            def add(name, data):
+                info = tarfile.TarInfo(name)
+                info.size = len(data)
+                tar.addfile(info, io.BytesIO(data))
+            add('scene-widget.json.gz', gzip.compress(json.dumps(box_scene(7)).encode()))
+            add('scene-other.json.gz', gzip.compress(json.dumps(box_scene(9)).encode()))
+            add('bundle.json', b'{"commit": "deadbeef"}')
+        bundle.write_bytes(buf.getvalue())
+        (root / 'cadview.json').write_text(json.dumps({
+            'designs': [{'scene': 'widget', 'script': 'widget.py'}],
+            'prebuilt': {'url': bundle.as_uri()}}))
+        with patch.object(server, 'MANIFEST', root / 'cadview.json'), patch.object(server, 'RUN_ROOTS', [root]):
+            seeded, commit = server._seed_prebuilt(self.app['store'], {'widget'})
+            self.assertEqual((seeded, commit), (['widget'], 'deadbeef'))
+            self.assertIn('widget', self.app['store'].meta)
+            self.assertFalse((server.DATA_DIR / 'scene-other.json.gz').exists())   # only what was asked for
+            self.assertEqual(server._seed_prebuilt(self.app['store'], set()), ([], None))
+            rows = (await (await self.client.get('/api/runnable')).json())['projects']
+            self.assertTrue(rows[0]['built'])
+            # staleness: unknown commit -> rebuild; clean tree at the bundle's commit -> no rebuild
+            self.assertTrue(server._sources_changed_since('deadbeef'))
+            g = ['git', '-C', str(root)]
+            subprocess.run(g + ['init', '-q'], check=True)
+            subprocess.run(g + ['-c', 'user.name=t', '-c', 'user.email=t@t', 'add', '.'], check=True)
+            subprocess.run(g + ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', 'x'], check=True)
+            head = subprocess.run(g + ['rev-parse', 'HEAD'], capture_output=True, text=True).stdout.strip()
+            self.assertFalse(server._sources_changed_since(head))
+            (root / 'widget.py').write_text('print(2)\n')
+            self.assertTrue(server._sources_changed_since(head))
+
     def test_client_scene_name_comes_from_the_nearest_manifest(self):
         from cadview import client
         root = Path(self.tmp.name) / 'repo'

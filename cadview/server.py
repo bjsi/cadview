@@ -31,6 +31,7 @@ import re
 import sys
 import time
 import urllib.parse
+import urllib.request
 from pathlib import Path
 
 import aiohttp
@@ -471,6 +472,134 @@ def _manifest():
     return out
 
 
+# ---- prebuilt scenes: "prebuilt" in cadview.json seeds a fresh data dir ----
+#   "prebuilt": {"github_release": "org/repo", "tag": "scenes",
+#                "asset": "cadview-scenes.tar.gz"}      (or {"url": "https://…"})
+# The tarball holds scene-<p>.json.gz files plus bundle.json {"commit": sha}
+# (a CI job builds it — see the README). Unbuilt designs are seeded from it
+# before anything builds, so a clone's gallery is complete in seconds; they
+# are then rebuilt in the background only if a *.py changed since that
+# commit. Private GitHub releases use GITHUB_TOKEN/GH_TOKEN, `gh auth token`,
+# or the token git itself cloned with (`git credential fill`).
+def _manifest_prebuilt():
+    try:
+        spec = json.loads(MANIFEST.read_text()).get("prebuilt")
+    except (OSError, ValueError, AttributeError):
+        return None
+    return spec if isinstance(spec, dict) else None
+
+
+def _github_token(host="github.com"):
+    import subprocess
+    token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
+    if token:
+        return token
+    env = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
+    for cmd, stdin in ((["gh", "auth", "token", "-h", host], None),
+                       (["git", "credential", "fill"], f"protocol=https\nhost={host}\n\n")):
+        try:
+            out = subprocess.run(cmd, input=stdin, capture_output=True, text=True, timeout=20, env=env)
+        except (OSError, subprocess.TimeoutExpired):
+            continue
+        if out.returncode != 0:
+            continue
+        if cmd[0] == "gh":
+            return out.stdout.strip() or None
+        for line in out.stdout.splitlines():
+            if line.startswith("password="):
+                return line[len("password="):]
+    return None
+
+
+class _DropAuthOnRedirect(urllib.request.HTTPRedirectHandler):
+    # a GitHub asset redirects to object storage, which rejects a request
+    # carrying the API bearer token alongside its own signed query
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        new = super().redirect_request(req, fp, code, msg, headers, newurl)
+        if new is not None and urllib.parse.urlparse(newurl).netloc != urllib.parse.urlparse(req.full_url).netloc:
+            new.remove_header("Authorization")
+        return new
+
+
+def _fetch_prebuilt(spec):
+    """The bundle's bytes, or None when the spec names nothing fetchable."""
+    opener = urllib.request.build_opener(_DropAuthOnRedirect)
+    headers = {"User-Agent": "cadview"}
+    url = spec.get("url")
+    if not url:
+        repo = spec.get("github_release")
+        if not repo:
+            return None
+        tag, asset = spec.get("tag", "scenes"), spec.get("asset", "cadview-scenes.tar.gz")
+        token = _github_token()
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        req = urllib.request.Request(f"https://api.github.com/repos/{repo}/releases/tags/{tag}",
+                                     headers={**headers, "Accept": "application/vnd.github+json"})
+        with opener.open(req, timeout=30) as r:
+            release = json.load(r)
+        url = next((a.get("url") for a in release.get("assets", []) if a.get("name") == asset), None)
+        if not url:
+            return None
+        headers["Accept"] = "application/octet-stream"
+    with opener.open(urllib.request.Request(url, headers=headers), timeout=300) as r:
+        return r.read()
+
+
+def _seed_prebuilt(store, scenes):
+    """Write the bundle's scene files for these (unbuilt) manifest scenes
+    into the data dir -> (seeded scenes, bundle commit)."""
+    import io
+    import tarfile
+    spec = _manifest_prebuilt()
+    if not spec or not scenes or os.environ.get("CADVIEW_NO_PREBUILT"):
+        return [], None
+    try:
+        blob = _fetch_prebuilt(spec)
+    except Exception as e:
+        log.warning("prebuilt scenes unavailable (%s) — building instead", e)
+        return [], None
+    if not blob:
+        return [], None
+    seeded, commit = [], None
+    try:
+        with tarfile.open(fileobj=io.BytesIO(blob), mode="r:gz") as tar:
+            for m in tar.getmembers():
+                name = Path(m.name).name
+                if not m.isfile():
+                    continue
+                if name == "bundle.json":
+                    try:
+                        commit = json.load(tar.extractfile(m)).get("commit")
+                    except (ValueError, AttributeError):
+                        pass
+                elif name.startswith("scene-") and name.endswith(".json.gz"):
+                    project = name[len("scene-"):-len(".json.gz")]
+                    if project in scenes and PROJECT_RE.fullmatch(project):
+                        atomic_write(scene_file(project), tar.extractfile(m).read())
+                        seeded.append(project)
+    except (tarfile.TarError, OSError) as e:
+        log.warning("prebuilt scenes unreadable (%s) — building instead", e)
+    if seeded:
+        store.load()
+    return seeded, commit
+
+
+def _sources_changed_since(commit):
+    """False only when git can say no *.py (or the manifest) under the
+    project changed since `commit` — unknown means rebuild."""
+    import subprocess
+    if not commit:
+        return True
+    try:
+        out = subprocess.run(["git", "-C", str(MANIFEST.parent), "diff", "--name-only", str(commit),
+                              "--", "*.py", "cadview.json"],
+                             capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.TimeoutExpired):
+        return True
+    return out.returncode != 0 or bool(out.stdout.strip())
+
+
 def _runnable_path(src):
     """Absolute existing .py under an allowed root, symlink-resolved — or None."""
     if not isinstance(src, str) or not src:
@@ -739,7 +868,15 @@ async def _start_watchers(app):
     for scene, _title, p in designs:
         _register(p, scene)
         _ensure_watch(app, scene, p)
-    todo = [(scene, p) for scene, _title, p in designs if scene not in app["store"].meta]
+    store = app["store"]
+    unbuilt = {scene for scene, _title, _p in designs if scene not in store.meta}
+    seeded, commit = (await asyncio.to_thread(_seed_prebuilt, store, unbuilt)) if unbuilt else ([], None)
+    todo = [(scene, p) for scene, _title, p in designs if scene not in store.meta]
+    if seeded:
+        log.info("prebuilt scenes seeded: %s (bundle %s)", ", ".join(seeded), (commit or "?")[:10])
+        if await asyncio.to_thread(_sources_changed_since, commit):
+            log.info("sources changed since that bundle — rebuilding seeded designs in the background")
+            todo += [(scene, p) for scene, _title, p in designs if scene in seeded]
     if todo:
         app["queued"].update(scene for scene, _ in todo)
         log.info("manifest: building %s", ", ".join(scene for scene, _ in todo))
