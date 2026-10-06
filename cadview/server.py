@@ -673,15 +673,25 @@ async def _watch_loop(app, project, path: Path):
     is only marked dirty — the rebuild fires when someone next opens it."""
     root = _repo_root(path)
 
+    SKIP = {".git", ".venv", "venv", "node_modules", "__pycache__", ".cache", "exports"}
+
     def snap():
+        # source only: a clone's .venv holds the whole CAD stack (tens of
+        # thousands of .py), build outputs change on every run
         out = {}
-        for i, f in enumerate(root.rglob("*.py")):
-            if i >= 4000:
-                break
-            try:
-                out[str(f)] = f.stat().st_mtime_ns
-            except OSError:
-                pass
+        n = 0
+        for dirpath, dirnames, filenames in os.walk(root):
+            dirnames[:] = [d for d in dirnames if d not in SKIP and not d.startswith(".")]
+            for name in filenames:
+                if not name.endswith(".py"):
+                    continue
+                n += 1
+                if n > 20000:
+                    return out
+                try:
+                    out[os.path.join(dirpath, name)] = os.stat(os.path.join(dirpath, name)).st_mtime_ns
+                except OSError:
+                    pass
         return out
 
     last = await asyncio.to_thread(snap)
