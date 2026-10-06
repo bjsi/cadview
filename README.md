@@ -3,7 +3,10 @@
 Live browser viewer for [build123d](https://github.com/gumyr/build123d) /
 CadQuery — a drop-in `show()` for OCP CAD Viewer / ocp_vscode users.
 
-![cadview](docs/ui.png)
+<table><tr>
+<td width="50%"><img src="docs/ui.png" alt="the viewer"/></td>
+<td width="50%"><img src="docs/gallery.png" alt="the gallery"/></td>
+</tr></table>
 
 Same call, plus:
 
@@ -15,8 +18,8 @@ Same call, plus:
   during playback, ⏺ records to video
 - **Agent-native** — Claude Code reads your selection and part positions,
   verifies animations headlessly
-- **Multi-scene, multi-device** — every design on one server, live on
-  desktop and phone
+- **Multi-scene, multi-device** — every design on one server with a
+  searchable thumbnail gallery, live on desktop and phone
 
 ## Install
 

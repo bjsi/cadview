@@ -234,6 +234,31 @@ function buildModel(msg) {
     restoreCamera = false;
     render();
     if (!tray.hidden) buildTray();
+    sendThumb();
+}
+
+// gallery thumbnails: snapshot the freshly built scene (tiny PNG, debounced)
+let thumbTimer = 0;
+function sendThumb() {
+    if (!project) return;           // POST just fails quietly when offline
+    clearTimeout(thumbTimer);
+    thumbTimer = setTimeout(() => {
+        try {
+            const c = renderer.domElement;
+            const w = 480, h = Math.max(1, Math.round(480 * c.height / c.width));
+            const o = document.createElement("canvas");
+            o.width = w; o.height = h;
+            const g = o.getContext("2d");
+            g.fillStyle = "#1b1f27";
+            g.fillRect(0, 0, w, h);
+            render();                      // ensure the buffer is fresh
+            g.drawImage(c, 0, 0, w, h);
+            o.toBlob((blob) => {
+                if (blob) fetch(`/api/thumb?name=${encodeURIComponent(project)}`,
+                                { method: "POST", body: blob }).catch(() => { });
+            }, "image/png");
+        } catch (e) { }
+    }, 1200);
 }
 
 // ---- camera ----------------------------------------------------------------

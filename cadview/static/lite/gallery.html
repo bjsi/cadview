@@ -1,0 +1,94 @@
+<!doctype html>
+<!-- cadview gallery: every scene on this server, thumbnail + search.
+     Thumbnails are posted by viewer pages as scenes get viewed/rebuilt. -->
+<html>
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>cadview</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect x='2' y='2' width='12' height='12' rx='2' fill='%2388c0d0'/%3E%3C/svg%3E" />
+    <style>
+        html, body { margin: 0; background: #1b1f27; color: #d8dee9;
+            font: 14px -apple-system, system-ui, sans-serif; }
+        header { display: flex; align-items: center; gap: 14px;
+            padding: 14px 18px 6px; }
+        header h1 { font-size: 16px; margin: 0; font-weight: 650; }
+        #q { flex: 1; max-width: 420px; height: 36px; border: 0; border-radius: 18px;
+            padding: 0 16px; background: rgba(59, 66, 82, 0.9); color: #eceff4;
+            font: 14px system-ui, sans-serif; outline: none; }
+        #q::placeholder { color: #8b93a3; }
+        #grid { display: grid; gap: 14px; padding: 12px 18px 24px;
+            grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); }
+        .card { background: rgba(37, 44, 58, 0.8); border-radius: 12px;
+            overflow: hidden; cursor: pointer; text-decoration: none; color: inherit;
+            transition: transform 0.08s, background 0.12s; }
+        .card:hover { background: rgba(50, 60, 78, 0.9); transform: translateY(-2px); }
+        .card .im { aspect-ratio: 16/10; background:
+            linear-gradient(140deg, #232a38, #1d222d); display: flex;
+            align-items: center; justify-content: center; }
+        .card img { width: 100%; height: 100%; object-fit: cover; display: block; }
+        .card .ph { color: #4c566a; }
+        .card .meta { padding: 9px 12px 11px; }
+        .card .t { font-weight: 600; font-size: 13.5px; white-space: nowrap;
+            overflow: hidden; text-overflow: ellipsis; }
+        .card .s { font-size: 11px; color: #8b93a3; margin-top: 2px;
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        #none { color: #8b93a3; padding: 30px 18px; display: none; }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>cadview</h1>
+        <input id="q" type="search" placeholder="search designs…" autofocus />
+    </header>
+    <div id="grid"></div>
+    <div id="none">nothing matches</div>
+    <script>
+        const PH = '<svg class="ph" width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.3 7 12 12 20.7 7"/><line x1="12" y1="22" x2="12" y2="12"/></svg>';
+        let rows = [];
+        const grid = document.getElementById("grid");
+        const none = document.getElementById("none");
+        const q = document.getElementById("q");
+
+        function render() {
+            const needle = q.value.trim().toLowerCase();
+            grid.textContent = "";
+            let shown = 0;
+            for (const r of rows) {
+                const hay = `${r.title || ""} ${r.name || ""} ${r.project} ${r.group || ""}`.toLowerCase();
+                if (needle && !hay.includes(needle)) continue;
+                shown++;
+                const a = document.createElement("a");
+                a.className = "card";
+                a.href = "/" + encodeURIComponent(r.project);
+                const im = document.createElement("div");
+                im.className = "im";
+                const img = document.createElement("img");
+                img.loading = "lazy";
+                img.src = `/thumbs/${encodeURIComponent(r.project)}.png?v=${encodeURIComponent(r.received_at || "")}`;
+                img.onerror = () => { img.remove(); im.innerHTML = PH; };
+                im.append(img);
+                const meta = document.createElement("div");
+                meta.className = "meta";
+                const t = document.createElement("div");
+                t.className = "t";
+                t.textContent = r.title || r.name || r.project;
+                const s = document.createElement("div");
+                s.className = "s";
+                const when = (r.received_at || "").replace("T", " ").replace(/:\d\d[+-].*$/, "");
+                s.textContent = [r.project, when].filter(Boolean).join(" · ");
+                meta.append(t, s);
+                a.append(im, meta);
+                grid.append(a);
+            }
+            none.style.display = shown ? "none" : "block";
+        }
+
+        q.addEventListener("input", render);
+        fetch("/api/runnable", { cache: "no-store" })
+            .then((r) => r.json())
+            .then((d) => { rows = d.projects || []; render(); })
+            .catch(() => { none.textContent = "no server reachable"; none.style.display = "block"; });
+    </script>
+</body>
+</html>

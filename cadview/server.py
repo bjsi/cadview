@@ -277,20 +277,25 @@ def project_of(request, allow_none=True):
     return name
 
 
+def _tls_redirect(request):
+    """With a TLS listener configured, upgrade non-loopback page loads to it
+    — embedded browser panes only run scripts on secure origins. The
+    canonical host matters: certs name a FQDN, so short-name requests must
+    redirect to CADVIEW_TLS_HOST, not echo their own Host header."""
+    if (os.environ.get("CADVIEW_TLS_CERT") and request.scheme == "http"
+            and _peer(request) not in ("127.0.0.1", "::1")):
+        host = os.environ.get("CADVIEW_TLS_HOST") or request.host.rsplit(":", 1)[0]
+        port = os.environ.get("CADVIEW_TLS_PORT", "3943")
+        raise web.HTTPTemporaryRedirect(f"https://{host}:{port}{request.path_qs}")
+
+
 async def handle_lite(request):
     """The lite viewer (static ES modules on bare three.js): /lite/<project>.
     Served from a path route, so inject <base> to point its relative asset
     URLs at /static/lite/ — a static-host deployment needs no injection
     because the files sit next to each other there."""
     project_of(request)
-    # with a TLS listener configured, upgrade page loads to it — embedded
-    # browser panes only run scripts on secure origins. Loopback is exempt
-    # (the cert names the public host, not 127.0.0.1).
-    if (os.environ.get("CADVIEW_TLS_CERT") and request.scheme == "http"
-            and _peer(request) not in ("127.0.0.1", "::1")):
-        host = request.host.rsplit(":", 1)[0]
-        port = os.environ.get("CADVIEW_TLS_PORT", "3943")
-        raise web.HTTPTemporaryRedirect(f"https://{host}:{port}{request.path_qs}")
+    _tls_redirect(request)
     lite_dir = STATIC_DIR / "lite"
     stamp = str(max(int(p.stat().st_mtime) for p in lite_dir.glob("*")
                     if p.is_file()))
@@ -691,6 +696,25 @@ async def handle_watch(request):
 # message AT an agent, he selects geometry and tells the agent in its own
 # terminal/desktop session — the agent reads the selection via GET
 # /api/selection or the cadview MCP tool (plain MCP, no channels preview).
+
+async def handle_thumb_post(request):
+    """Viewer pages snapshot each scene they build (small PNG) so the
+    gallery has thumbnails without any server-side rendering."""
+    _reject_cross_site(request)
+    project = project_of(request, allow_none=False)
+    body = await request.read()
+    if not body[:8] == b"\x89PNG\r\n\x1a\n" or len(body) > 400_000:
+        raise web.HTTPBadRequest(text="want a PNG under 400KB")
+    await asyncio.to_thread(atomic_write, DATA_DIR / "thumbs" / f"{project}.png", body)
+    return web.json_response({"ok": True})
+
+
+async def handle_gallery(request):
+    _tls_redirect(request)
+    text = (STATIC_DIR / "lite" / "gallery.html").read_text()
+    return web.Response(text=text, content_type="text/html",
+                        headers={"Cache-Control": "no-cache"})
+
 
 async def handle_boot_error(request):
     """Startup-failure beacons from environments with no devtools (embedded
@@ -1101,7 +1125,7 @@ def make_app() -> web.Application:
     app["geom_cache"] = {}          # (project, revision) -> nodes/instance boxes
     app.on_startup.append(_start_watchers)
     app.cleanup_ctx.append(_http_client)
-    app.router.add_get("/", handle_lite)            # lite IS the viewer now
+    app.router.add_get("/", handle_gallery)         # project overview
     app.router.add_get("/api/scene", handle_get_scene)
     app.router.add_post("/api/scene", handle_post_scene)
     app.router.add_delete("/api/scene", handle_delete_scene)
@@ -1109,6 +1133,9 @@ def make_app() -> web.Application:
     app.router.add_get("/api/history", handle_history)
     app.router.add_get("/ws", handle_ws)
     app.router.add_static("/static", STATIC_DIR)
+    (DATA_DIR / "thumbs").mkdir(parents=True, exist_ok=True)
+    app.router.add_static("/thumbs", DATA_DIR / "thumbs")
+    app.router.add_post("/api/thumb", handle_thumb_post)
     app.router.add_post("/api/boot-error", handle_boot_error)
     app.router.add_get("/api/parts", handle_parts)
     app.router.add_post("/api/clearance", handle_clearance)
