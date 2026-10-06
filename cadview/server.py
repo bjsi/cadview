@@ -571,7 +571,7 @@ async def handle_runnable(request):
                      "module": module.name if module else None,
                      "group": group})
     # scenes without a stamped source inherit their family's group by name
-    # prefix (drop-in-panels-frame -> drop-in-panels), else stand alone
+    # prefix (widget-frame -> widget), else stand alone
     named = {r["project"]: r for r in rows}
     for r in rows:
         if r["group"]:
