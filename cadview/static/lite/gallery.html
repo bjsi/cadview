@@ -51,6 +51,7 @@
     <script>
         const PH = '<svg class="ph" width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.3 7 12 12 20.7 7"/><line x1="12" y1="22" x2="12" y2="12"/></svg>';
         let rows = [];
+        let staticMode = false;     // true when fed by a baked scenes.json
         const groupsEl = document.getElementById("groups");
         const none = document.getElementById("none");
         const q = document.getElementById("q");
@@ -58,12 +59,13 @@
         function card(r) {
             const a = document.createElement("a");
             a.className = "card";
-            a.href = "/" + encodeURIComponent(r.project);
+            // relative in both worlds: /<p> on a server, <site>/<p>/ static
+            a.href = "./" + encodeURIComponent(r.project) + (staticMode ? "/" : "");
             const im = document.createElement("div");
             im.className = "im";
             const img = document.createElement("img");
             img.loading = "lazy";
-            img.src = `/thumbs/${encodeURIComponent(r.project)}.png?v=${encodeURIComponent(r.received_at || "")}`;
+            img.src = `./thumbs/${encodeURIComponent(r.project)}.png?v=${encodeURIComponent(r.received_at || "")}`;
             img.onerror = () => { img.remove(); im.innerHTML = PH; };
             im.append(img);
             const meta = document.createElement("div");
@@ -114,9 +116,12 @@
             none.style.display = groups.length ? "none" : "block";
         }
 
-                q.addEventListener("input", render);
+        q.addEventListener("input", render);
+        // a live server lists scenes; a static site bakes scenes.json
         fetch("/api/runnable", { cache: "no-store" })
-            .then((r) => r.json())
+            .then((r) => { if (!r.ok) throw new Error(); return r.json(); })
+            .catch(() => fetch("./scenes.json", { cache: "no-store" })
+                .then((r) => { if (!r.ok) throw new Error(); staticMode = true; return r.json(); }))
             .then((d) => { rows = d.projects || []; render(); })
             .catch(() => { none.textContent = "no server reachable"; none.style.display = "block"; });
     </script>

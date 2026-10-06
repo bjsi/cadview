@@ -24,9 +24,13 @@ live updates, without one this is still a full viewer; (3) install is a URL.
         #hud {
             position: fixed; left: 8px; top: 8px; z-index: 10;
             font-size: 11px; color: #888; background: rgba(128,128,128,0.12);
-            border-radius: 6px; padding: 3px 8px; pointer-events: none;
+            border-radius: 6px; padding: 3px 8px; text-decoration: none;
             max-width: 70vw; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+            display: inline-flex; align-items: center; gap: 5px;
         }
+        #hud:hover { background: rgba(136, 192, 208, 0.22); color: #d8dee9; }
+        #hud .home { color: #8b93a3; display: inline-flex; }
+        #hud:hover .home { color: #88c0d0; }
         #hud .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%;
                     background: #c00; margin-right: 5px; vertical-align: 1px; }
         #hud.connected .dot { background: #2a2; }
@@ -187,7 +191,7 @@ live updates, without one this is still a full viewer; (3) install is a URL.
     <div id="view"></div>
     <div id="empty">loading…</div>
     <canvas id="gizmo" width="110" height="110"></canvas>
-    <div id="hud"><span class="dot"></span><span id="hud-text">connecting…</span><span id="hud-run"></span></div>
+    <a id="hud" href="/" title="all designs"><span class="home"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg></span><span class="dot"></span><span id="hud-text">connecting…</span><span id="hud-run"></span></a>
     <div id="pickpanel" hidden></div>
     <button id="traybtn" aria-label="parts"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg></button>
     <div id="selpanel" hidden></div>

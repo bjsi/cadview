@@ -1271,7 +1271,11 @@ function onRunEvent(msg) {
 }
 
 // ---- data in: fetch + live websocket (rule 2: server is an enhancement) ----
-const project = location.pathname.replace(/^\/(lite\/?)?/, "").replace(/\/+$/, "");
+// the scene is the last path segment: /<project> on a server, or
+// <site>/<project>/ on a static deployment under any subpath
+const project = decodeURIComponent(location.pathname.split("/").filter(Boolean).pop() || "");
+// a static deployment has no stamp; its gallery is the site root (base href ../)
+hud.href = document.querySelector("meta[name=lite-stamp]") ? "/" : "./";
 let lastReceivedAt = null;
 
 async function fetchScene() {
@@ -1281,9 +1285,13 @@ async function fetchScene() {
     try { resp = await fetch(url, { cache: "no-store" }); } catch { resp = null; }
     if (!resp || !resp.ok) {
         // static deployment (rule 2: no server, still a full viewer): a
-        // baked scene.json next to the page is the whole install
-        try { resp = await fetch("./scene.json", { cache: "no-store" }); } catch { return false; }
-        if (!resp.ok) { emptyMsg.textContent = "nothing pushed for " + (project || "any project") + " yet"; return false; }
+        // baked scene.json next to the page, or scenes/<project>.json on
+        // a multi-scene site (page at <project>/, base href ../)
+        for (const candidate of ["./scene.json", `./scenes/${encodeURIComponent(project)}.json`]) {
+            try { resp = await fetch(candidate, { cache: "no-store" }); } catch { resp = null; }
+            if (resp && resp.ok) break;
+        }
+        if (!resp || !resp.ok) { emptyMsg.textContent = "nothing pushed for " + (project || "any project") + " yet"; return false; }
     }
     const text = await resp.text();
     timings.download_ms = performance.now() - t0;
