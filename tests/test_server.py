@@ -33,17 +33,25 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
         return (await resp.json())['revision']
 
     async def test_rapid_pushes_have_unique_revisions_and_bounded_durable_history(self):
+        # concurrent pushes COMPLETE in event-loop order, which differs by
+        # platform (Windows proactor reorders the batch) — assert the
+        # retention contract, not a scheduling order
         with patch.object(server.time, 'strftime', return_value='same-second'):
             revisions = await asyncio.gather(*(self.push(10+i) for i in range(7)))
         self.assertEqual(len(set(revisions)), 7)
         history = await (await self.client.get('/api/history?name=demo')).json()
-        self.assertEqual([m['revision'] for m in history['revisions']], list(reversed(revisions[-5:])))
+        kept = [m['revision'] for m in history['revisions']]
+        self.assertEqual(len(kept), 5)
+        self.assertTrue(set(kept) <= set(revisions))
+        current = self.app['store'].meta['demo']['revision']
+        self.assertEqual(kept[0], current)
         reloaded = server.SceneStore()
-        self.assertEqual(reloaded.meta['demo']['revision'], revisions[-1])
+        self.assertEqual(reloaded.meta['demo']['revision'], current)
         self.assertEqual(len(reloaded.revisions('demo')), 5)
-        old = await self.client.get('/api/scene?name=demo&revision='+revisions[-2])
-        self.assertEqual((await old.json())['meta']['revision'], revisions[-2])
-        self.assertEqual((await self.client.get('/api/scene?name=demo&revision='+revisions[0])).status, 404)
+        old = await self.client.get('/api/scene?name=demo&revision='+kept[-1])
+        self.assertEqual((await old.json())['meta']['revision'], kept[-1])
+        dropped = next(r for r in revisions if r not in kept)
+        self.assertEqual((await self.client.get('/api/scene?name=demo&revision='+dropped)).status, 404)
         self.assertEqual(len(list((server.DATA_DIR/'history/demo').glob('*.gz'))), 4)
 
     async def test_failed_persist_does_not_publish(self):
