@@ -202,5 +202,18 @@ live updates, without one this is still a full viewer; (3) install is a URL.
     </div>
     <div id="tray" hidden></div>
     <script type="module" src="./lite.js"></script>
+    <script>
+        // if the module never boots (no WebGL, embedded webview, blocked
+        // modules), say so instead of sitting on "loading…" forever
+        setTimeout(function () {
+            if (!window.cadviewLite) {
+                var el = document.getElementById("empty");
+                el.hidden = false;
+                el.textContent = "The viewer couldn't start in this browser " +
+                    "(it needs WebGL and ES modules — embedded panes often lack them). " +
+                    "Open this URL in a regular browser tab.";
+            }
+        }, 7000);
+    </script>
 </body>
 </html>

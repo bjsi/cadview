@@ -13,7 +13,14 @@ const hudText = document.getElementById("hud-text");
 const emptyMsg = document.getElementById("empty");
 
 // ---- renderer / scene / camera ---------------------------------------------
-const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+let renderer;
+try {
+    renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+} catch (e) {
+    emptyMsg.textContent = "No WebGL in this browser — the 3D viewer needs it. " +
+        "Open this URL in a regular browser tab.";
+    throw e;
+}
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 view.appendChild(renderer.domElement);
 
