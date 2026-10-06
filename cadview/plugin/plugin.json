@@ -1,0 +1,15 @@
+{
+    "name": "cadview",
+    "version": "0.2.0",
+    "description": "Read the current cadview viewer selection (parts/faces with measurements) from any Claude Code session — select geometry on the page, then just say 'these'.",
+    "mcpServers": {
+        "cadview": {
+            "command": "node",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/server.mjs"],
+            "env": {
+                "CADVIEW_URL": "${user_config.url}",
+                "CADVIEW_PROJECT": "${user_config.project}"
+            }
+        }
+    }
+}

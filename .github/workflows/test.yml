@@ -1,0 +1,22 @@
+name: tests
+on: [push, pull_request]
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python: ["3.10", "3.12"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: pip install -e . --no-deps && pip install aiohttp
+      - run: python -m unittest discover -s tests -p "test_server.py" -v
+      - run: python -m unittest discover -s tests -p "test_anim.py" -v
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: node --check cadview/plugin/server.mjs

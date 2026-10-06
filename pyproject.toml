@@ -1,0 +1,24 @@
+[project]
+name = "cadview"
+version = "0.2.0"
+description = "Persistent browser viewer for build123d/CadQuery — drop-in show(), live re-pushes, animations, selection agents can query"
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.10"
+dependencies = [
+    "aiohttp>=3.9",
+    "ocp-tessellate>=3.4",
+]
+
+[project.scripts]
+cadview = "cadview.server:main"
+
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["cadview"]
+
+[tool.setuptools.package-data]
+cadview = ["static/lite/*", "static/lite/vendor/*", "plugin/*"]
