@@ -43,6 +43,7 @@ part in the tree, ⏺ records the playing clip to video.
 
 Try it without installing: **[bjsi.github.io/cadview](https://bjsi.github.io/cadview/)** —
 or locally, `python examples/demo.py` → `http://127.0.0.1:3941/demo`
+(`python examples/parts.py` adds a few more to browse in the gallery at `/`)
 
 ## Animate
 
