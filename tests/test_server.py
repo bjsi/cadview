@@ -48,9 +48,11 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
                 patch.object(server, 'RUN_ROOTS', [root]), \
                 patch.object(server, 'RUN_REGISTRY', root / 'runnable.txt'):
             self.assertEqual([s for s, _t, _p in server._manifest()], ['widget'])
+            self.assertEqual([(s, sc) for s, _t, sc in server._manifest_missing()], [('ghost', 'parts/missing.py')])
             self.app['queued'].add('widget')
             rows = (await (await self.client.get('/api/runnable')).json())['projects']
-            self.assertEqual([r['project'] for r in rows], ['widget'])
+            self.assertEqual([r['project'] for r in rows], ['widget', 'ghost'])
+            self.assertIn('script not found', rows[1]['error'][0])   # a moved script is a visible failure
             self.assertEqual(rows[0]['title'], 'The widget')
             self.assertFalse(rows[0]['built'])
             self.assertTrue(rows[0]['queued'])

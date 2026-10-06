@@ -472,6 +472,23 @@ def _manifest():
     return out
 
 
+def _manifest_missing():
+    """[(scene, title, script)] for cadview.json entries whose script is not
+    an existing .py under the project — shown as failed cards, not dropped."""
+    try:
+        data = json.loads(MANIFEST.read_text())
+    except (OSError, ValueError):
+        return []
+    out = []
+    for d in (data.get("designs") if isinstance(data, dict) else None) or []:
+        scene, script = d.get("scene"), d.get("script")
+        if not (isinstance(scene, str) and PROJECT_RE.fullmatch(scene) and isinstance(script, str)):
+            continue
+        if not _runnable_path(str(MANIFEST.parent / script)):
+            out.append((scene, d.get("title"), script))
+    return out
+
+
 # ---- prebuilt scenes: "prebuilt" in cadview.json seeds a fresh data dir ----
 #   "prebuilt": {"github_release": "org/repo", "tag": "scenes",
 #                "asset": "cadview-scenes.tar.gz"}      (or {"url": "https://…"})
@@ -750,6 +767,13 @@ async def handle_runnable(request):
         row["queued"] = scene in queued
         if last.get(scene, {}).get("status") == "error":
             row["error"] = last[scene]["tail"]
+    for scene, title, script in _manifest_missing():
+        if any(r["project"] == scene for r in rows):
+            continue
+        rows.append({"project": scene, "name": None, "title": title, "received_at": None,
+                     "module": None, "group": MANIFEST.parent.name, "built": False,
+                     "building": False, "queued": False,
+                     "error": [f"cadview.json: script not found: {script}"]})
     # scenes without a stamped source inherit their family's group by name
     # prefix (widget-frame -> widget), else stand alone
     named = {r["project"]: r for r in rows}
@@ -868,6 +892,8 @@ async def _start_watchers(app):
     for scene, _title, p in designs:
         _register(p, scene)
         _ensure_watch(app, scene, p)
+    for scene, _title, script in _manifest_missing():
+        log.warning("cadview.json: %s -> %s does not exist (moved? fix the manifest)", scene, script)
     store = app["store"]
     unbuilt = {scene for scene, _title, _p in designs if scene not in store.meta}
     seeded, commit = (await asyncio.to_thread(_seed_prebuilt, store, unbuilt)) if unbuilt else ([], None)
