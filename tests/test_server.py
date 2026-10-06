@@ -59,6 +59,13 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
             rows = (await (await self.client.get('/api/runnable')).json())['projects']
             self.assertTrue(rows[0]['built'])
             self.assertEqual(rows[0]['title'], 'The widget')   # manifest title survives a push
+            # a helper the design runpy'd stamped itself and got registered:
+            # the manifest script still owns the scene (watch re-runs IT)
+            helper = root / 'parts' / 'helper.py'
+            helper.write_text('')
+            server._register(helper, 'widget')
+            self.app['store'].meta['widget']['source_file'] = str(helper)
+            self.assertEqual(server._module_for(self.app['store'], 'widget'), root / 'parts' / 'widget.py')
 
     def test_client_scene_name_comes_from_the_nearest_manifest(self):
         from cadview import client

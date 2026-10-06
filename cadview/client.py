@@ -171,6 +171,14 @@ def show(*cad_objs, names=None, colors=None, alphas=None, **kwargs):
     if src.endswith(".py") and os.path.exists(src):
         message["meta"]["source_file"] = os.path.abspath(src)
         m_scene, m_title = _manifest_design(src)
+    if m_scene is None:
+        # a design script that runpy's helpers may have imported us while
+        # sys.argv[0] pointed at a helper; the running __main__ is the design
+        main_file = getattr(sys.modules.get("__main__"), "__file__", None) or ""
+        if main_file != src and main_file.endswith(".py") and os.path.exists(main_file):
+            m_scene, m_title = _manifest_design(main_file)
+            if m_scene:
+                message["meta"]["source_file"] = os.path.abspath(main_file)
     title = kwargs.get("title") or m_title
     if title:
         # org-facing display name (the picker/hud show it instead of the

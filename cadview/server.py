@@ -509,9 +509,14 @@ def _register(p: Path, project: str):
 
 
 def _module_for(store, project):
-    """The registered module behind a project's scene: the stamped source if
-    it earned registry entry, else the last module registered AS that project
-    (covers scenes pushed before source stamping existed)."""
+    """The registered module behind a project's scene: the manifest's script
+    when the project is listed there (a design's stamp can be a sub-script it
+    runpy'd), else the stamped source if it earned registry entry, else the
+    last module registered AS that project (covers scenes pushed before
+    source stamping existed)."""
+    for scene, _title, p in _manifest():
+        if scene == project:
+            return p
     reg = _registered()
     p = _runnable_path(store.meta.get(project, {}).get("source_file"))
     if p and str(p) in reg:
@@ -529,9 +534,11 @@ async def _broadcast_run(app, project, event):
 async def _run_module(app, project, path: Path):
     started = time.time()
     await _broadcast_run(app, project, {"status": "start", "path": path.name})
+    # CADVIEW_SOURCE: the stamp must be THIS script even when it runpy's
+    # sub-scripts (which rewrite sys.argv[0] and would register themselves)
     proc = await asyncio.create_subprocess_exec(
         CAD_PYTHON, str(path), cwd=str(path.parent),
-        env={**os.environ, "CADVIEW_SCENE": project},
+        env={**os.environ, "CADVIEW_SCENE": project, "CADVIEW_SOURCE": str(path)},
         stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT)
     try:
         out, _ = await asyncio.wait_for(proc.communicate(), timeout=RUN_TIMEOUT)
