@@ -443,6 +443,33 @@ CAD_PYTHON = os.environ.get("CADVIEW_CAD_PYTHON") or sys.executable
 AUTOREG_PEERS = {"127.0.0.1", "::1"} | {
     p.strip() for p in os.environ.get("CADVIEW_AUTOREG_PEERS", "").split(",") if p.strip()}
 
+# ---- project manifest: cadview.json in the directory `cadview` starts in ----
+#   {"designs": [{"scene": "arena-v2", "title": "Arena v2", "script": "show_arena.py"}]}
+# A repo that ships one is browsable the moment the viewer starts there: every
+# design is a gallery card at once, built in the background one after another,
+# and re-built on edit through the same registry + watcher as a pushed scene.
+# Same RCE fence as /api/run — the scripts are the repo's own, under cwd.
+MANIFEST = Path.cwd() / "cadview.json"
+RUN_ROOTS.append(Path.cwd())
+
+
+def _manifest():
+    """[(scene, title, path)] from cadview.json; entries that don't resolve
+    to an existing .py under the project are skipped."""
+    try:
+        data = json.loads(MANIFEST.read_text())
+    except (OSError, ValueError):
+        return []
+    out = []
+    for d in (data.get("designs") if isinstance(data, dict) else None) or []:
+        scene, script = d.get("scene"), d.get("script")
+        if not (isinstance(scene, str) and PROJECT_RE.fullmatch(scene) and isinstance(script, str)):
+            continue
+        p = _runnable_path(str(MANIFEST.parent / script))
+        if p:
+            out.append((scene, d.get("title"), p))
+    return out
+
 
 def _runnable_path(src):
     """Absolute existing .py under an allowed root, symlink-resolved — or None."""
@@ -519,6 +546,7 @@ async def _run_module(app, project, path: Path):
     log.info("run %s (%s): %s in %.1fs", path.name, project, "ok" if ok else "FAIL", seconds)
     event = {"status": "done" if ok else "error", "seconds": seconds,
              "tail": [t[-200:] for t in tail]}
+    app["last_run"][project] = event
     await _broadcast_run(app, project, event)
     return event
 
@@ -571,6 +599,21 @@ async def handle_runnable(request):
                      "received_at": meta.get("received_at"),
                      "module": module.name if module else None,
                      "group": group})
+    # manifest designs are cards before their first build finishes
+    locks, last, queued = request.app["run_locks"], request.app["last_run"], request.app["queued"]
+    for scene, title, p in _manifest():
+        row = next((r for r in rows if r["project"] == scene), None)
+        if row is None:
+            row = {"project": scene, "name": None, "title": None, "received_at": None,
+                   "module": p.name, "group": None}
+            rows.append(row)
+        row["title"] = row["title"] or title
+        row["group"] = row["group"] or MANIFEST.parent.name
+        row["built"] = scene in store.meta
+        row["building"] = scene in locks and locks[scene].locked()
+        row["queued"] = scene in queued
+        if last.get(scene, {}).get("status") == "error":
+            row["error"] = last[scene]["tail"]
     # scenes without a stamped source inherit their family's group by name
     # prefix (widget-frame -> widget), else stand alone
     named = {r["project"]: r for r in rows}
@@ -675,6 +718,27 @@ async def _start_watchers(app):
         p = _runnable_path(path_s)
         if p and project and PROJECT_RE.fullmatch(project):
             _ensure_watch(app, project, p)
+    designs = _manifest()
+    for scene, _title, p in designs:
+        _register(p, scene)
+        _ensure_watch(app, scene, p)
+    todo = [(scene, p) for scene, _title, p in designs if scene not in app["store"].meta]
+    if todo:
+        app["queued"].update(scene for scene, _ in todo)
+        log.info("manifest: building %s", ", ".join(scene for scene, _ in todo))
+        task = asyncio.create_task(_build_serially(app, todo))
+        app["run_tasks"].add(task)
+        task.add_done_callback(app["run_tasks"].discard)
+
+
+async def _build_serially(app, todo):
+    # one CAD process at a time: a fresh clone's first start must not fork
+    # ten OCP kernels on a laptop
+    for scene, p in todo:
+        lock = app["run_locks"].setdefault(scene, asyncio.Lock())
+        async with lock:
+            app["queued"].discard(scene)
+            await _run_module(app, scene, p)
 
 
 async def handle_watch(request):
@@ -1122,6 +1186,8 @@ def make_app() -> web.Application:
     app["run_tasks"] = set()        # keep background runs alive
     app["watchers"] = {}            # project -> watch task (default-on)
     app["dirty"] = set()            # changed while unviewed -> rebuild on open
+    app["last_run"] = {}            # project -> last run event (status, tail)
+    app["queued"] = set()           # manifest designs waiting for their first build
     app["selections"] = {}          # project -> current viewer selection
     app["geom_cache"] = {}          # (project, revision) -> nodes/instance boxes
     app.on_startup.append(_start_watchers)
@@ -1178,6 +1244,8 @@ def main():
     parser.add_argument("--tls-port", type=int,
                         default=int(os.environ.get("CADVIEW_TLS_PORT", "3943")))
     args = parser.parse_args()
+    # scripts this server runs (manifest builds, watch re-runs) push back here
+    os.environ["CADVIEW_PORT"] = str(args.port)
     logging.basicConfig(level=logging.INFO,
                         format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     access = (logging.getLogger("cadview.access")

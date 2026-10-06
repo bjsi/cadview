@@ -34,6 +34,45 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(await asyncio.to_thread(server.running_cadview, '127.0.0.1', port))
         self.assertFalse(await asyncio.to_thread(server.running_cadview, '127.0.0.1', 1))
 
+    async def test_manifest_designs_are_cards_before_their_first_build(self):
+        # a fresh clone's gallery lists every design in cadview.json at once;
+        # the server builds them (serially) and the rows say so meanwhile
+        root = Path(self.tmp.name) / 'repo'
+        (root / 'parts').mkdir(parents=True)
+        (root / 'parts' / 'widget.py').write_text('print("hi")\n')
+        (root / 'cadview.json').write_text(json.dumps({'designs': [
+            {'scene': 'widget', 'title': 'The widget', 'script': 'parts/widget.py'},
+            {'scene': 'bad name!', 'script': 'parts/widget.py'},
+            {'scene': 'ghost', 'script': 'parts/missing.py'}]}))
+        with patch.object(server, 'MANIFEST', root / 'cadview.json'), \
+                patch.object(server, 'RUN_ROOTS', [root]), \
+                patch.object(server, 'RUN_REGISTRY', root / 'runnable.txt'):
+            self.assertEqual([s for s, _t, _p in server._manifest()], ['widget'])
+            self.app['queued'].add('widget')
+            rows = (await (await self.client.get('/api/runnable')).json())['projects']
+            self.assertEqual([r['project'] for r in rows], ['widget'])
+            self.assertEqual(rows[0]['title'], 'The widget')
+            self.assertFalse(rows[0]['built'])
+            self.assertTrue(rows[0]['queued'])
+            self.assertEqual(rows[0]['group'], 'repo')
+            await self.push(project='widget')
+            rows = (await (await self.client.get('/api/runnable')).json())['projects']
+            self.assertTrue(rows[0]['built'])
+            self.assertEqual(rows[0]['title'], 'The widget')   # manifest title survives a push
+
+    def test_client_scene_name_comes_from_the_nearest_manifest(self):
+        from cadview import client
+        root = Path(self.tmp.name) / 'repo'
+        (root / 'tools').mkdir(parents=True)
+        script = root / 'tools' / 'show_thing.py'
+        script.write_text('')
+        (root / 'cadview.json').write_text(json.dumps({'designs': [
+            {'scene': 'thing', 'title': 'A thing', 'script': 'tools/show_thing.py'}]}))
+        self.assertEqual(client._manifest_design(str(script)), ('thing', 'A thing'))
+        other = root / 'tools' / 'other.py'
+        other.write_text('')
+        self.assertEqual(client._manifest_design(str(other)), (None, None))
+
     async def push(self, width=10, project='demo'):
         resp = await self.client.post('/api/scene?name='+project, json=box_scene(width))
         self.assertEqual(resp.status, 200, await resp.text())

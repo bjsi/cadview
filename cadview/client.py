@@ -84,6 +84,32 @@ def get_url():
     return f"http://{host}:{port}"
 
 
+def _manifest_design(src):
+    """(scene, title) for the pushing script from the nearest cadview.json
+    above it — the repo's design list, also what the server builds from —
+    else (None, None)."""
+    try:
+        here = Path(src).resolve()
+    except OSError:
+        return None, None
+    for root in here.parents:
+        mf = root / "cadview.json"
+        if not mf.is_file():
+            continue
+        try:
+            designs = json.loads(mf.read_text()).get("designs") or []
+        except (OSError, ValueError, AttributeError):
+            return None, None
+        for d in designs:
+            try:
+                if (root / d["script"]).resolve() == here:
+                    return d.get("scene"), d.get("title")
+            except (KeyError, TypeError, OSError):
+                pass
+        return None, None
+    return None, None
+
+
 def show(*cad_objs, names=None, colors=None, alphas=None, **kwargs):
     """Tessellate and push objects to the cadview server.
 
@@ -135,18 +161,21 @@ def show(*cad_objs, names=None, colors=None, alphas=None, **kwargs):
             "pushed_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
         },
     }
-    if kwargs.get("title"):
-        # org-facing display name (the picker/hud show it instead of the
-        # engineering scene name); server-side titles.json can also set it
-        message["meta"]["title"] = str(kwargs["title"])[:120]
     # stamp the pushing script so the viewer can offer re-run/watch — the
     # server only ever executes it if it lands in its runnable registry
     # (auto-registered only for pushes originating on the hub itself).
     # _ARGV0 is captured at import time: runpy.run_path swaps sys.argv[0] to
     # the inner script, and re-run must target the OUTER tool that was invoked.
     src = os.environ.get("CADVIEW_SOURCE") or _ARGV0
+    m_scene, m_title = (None, None)
     if src.endswith(".py") and os.path.exists(src):
         message["meta"]["source_file"] = os.path.abspath(src)
+        m_scene, m_title = _manifest_design(src)
+    title = kwargs.get("title") or m_title
+    if title:
+        # org-facing display name (the picker/hud show it instead of the
+        # engineering scene name); server-side titles.json can also set it
+        message["meta"]["title"] = str(title)[:120]
 
     animation = kwargs.get("animation")
     if animation:
@@ -188,8 +217,9 @@ def show(*cad_objs, names=None, colors=None, alphas=None, **kwargs):
     body = gzip.compress(json.dumps(message).encode(), compresslevel=3)
     t_encoded = time.perf_counter()
     url = get_url()
-    # one scene per project: CADVIEW_SCENE, else the pushing script's cwd basename
-    project = os.environ.get("CADVIEW_SCENE") or Path.cwd().name or "default"
+    # scene: CADVIEW_SCENE, else the repo's cadview.json entry for this script,
+    # else the pushing script's cwd basename (one scene per project)
+    project = os.environ.get("CADVIEW_SCENE") or m_scene or Path.cwd().name or "default"
     req = urllib.request.Request(
         url + "/api/scene?name=" + urllib.parse.quote(project),
         data=body,
