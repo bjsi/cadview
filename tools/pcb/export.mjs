@@ -51,7 +51,8 @@ await step("autoroute", async () => {
       obstacles.push({ type: "rect", layers: ["top", "bottom"], center: { x: (Math.min(...px) + Math.max(...px)) / 2, y: (Math.min(...py) + Math.max(...py)) / 2 },
         width: Math.max(...px) - Math.min(...px) + 0.5, height: Math.max(...py) - Math.min(...py) + 0.5, connectedTo: [] })
     } else if (e.type === "pcb_keepout") {
-      obstacles.push({ type: "rect", layers: e.layers, center: e.center, width: e.width, height: e.height, connectedTo: [] })
+      // grown like pads: the router otherwise nudges tracks into a bare keepout edge (DRC items_not_allowed)
+      obstacles.push({ type: "rect", layers: e.layers, center: e.center, width: e.width + 2 * CLR, height: e.height + 2 * CLR, connectedTo: [] })
     } else if (e.type === "pcb_via") {
       const d = e.outer_diameter + 2 * CLR
       obstacles.push({ type: "rect", layers: ["top", "bottom"], center: { x: e.x, y: e.y }, width: d, height: d, connectedTo: [] })
