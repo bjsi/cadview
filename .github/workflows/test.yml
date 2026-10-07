@@ -33,7 +33,7 @@ jobs:
           python-version: "3.12"
       - name: KiCad (kicad-cli + footprint/symbol libraries)
         run: |
-          sudo add-apt-repository -y ppa:kicad/kicad-9.0-releases
+          sudo add-apt-repository -y ppa:kicad/kicad-10.0-releases   # 10: `pcb drc --refill-zones --save-board` re-serialises the board
           sudo apt-get update -qq
           sudo apt-get install -y -qq --no-install-recommends kicad kicad-footprints kicad-symbols kicad-packages3d libgl1 libglu1-mesa
           kicad-cli version

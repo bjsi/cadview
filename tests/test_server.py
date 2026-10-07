@@ -67,7 +67,8 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
             helper.write_text('')
             server._register(helper, 'widget')
             self.app['store'].meta['widget']['source_file'] = str(helper)
-            self.assertEqual(server._module_for(self.app['store'], 'widget'), root / 'parts' / 'widget.py')
+            # resolved on both sides: macOS tmp is /private/var, Windows runners use 8.3 short names
+            self.assertEqual(server._module_for(self.app['store'], 'widget'), (root / 'parts' / 'widget.py').resolve())
 
     async def test_prebuilt_bundle_seeds_unbuilt_designs_and_git_decides_rebuild(self):
         import gzip, io, subprocess, tarfile
