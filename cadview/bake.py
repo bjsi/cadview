@@ -8,10 +8,13 @@ a demo site, an offline hand-off. No CAD stack needed, just the server.
                 three.js and the gzipped scene inlined. Opens from file://
                 or an email attachment, full orbit / part tree / hide /
                 measure / animation, nothing fetched. ~1 MB + the scene.
---changed-vs    keep only scenes whose geometry or animation differs from
-                the scenes in BUNDLE (a cadview-scenes.tar.gz as published
-                by a repo's scenes workflow) — "what this PR changed".
-                outdir/changed.json lists changed + unchanged either way.
+--changed-vs    keep only scenes whose parts or animation differ from the
+                scenes in BUNDLE (a cadview-scenes.tar.gz as published by a
+                repo's scenes workflow) — "what this PR changed", part by
+                part: outdir/changed.json has changed/unchanged scenes and,
+                per scene, the changed / added / removed part paths. Parts
+                are compared by a rebuild-stable signature (counts, face
+                types, bbox, area, placement, colour), not by mesh bytes.
 default         a static site: index.html (gallery), scenes.json,
                 scenes/<p>.json, thumbs/<p>.png, <p>/index.html (base
                 href ../); serve it from any static host.
@@ -49,21 +52,85 @@ def scene_message(url, project):
     return msg
 
 
-def geometry_key(msg):
-    """What a reviewer cares about: geometry + animation, not push times."""
-    body = {"data": msg.get("data"), "animations": msg.get("animations"), "config": msg.get("config")}
-    return hashlib.sha256(json.dumps(body, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+_TYPECODES = {"float32": "f", "float64": "d", "int32": "i", "uint32": "I", "int64": "q", "uint64": "Q",
+              "int16": "h", "uint16": "H", "int8": "b", "uint8": "B"}
 
 
-def bundle_keys(path):
-    """project -> geometry_key for every scene in a cadview-scenes.tar.gz."""
+def _numbers(field):
+    """A buffer-json field ({shape, dtype, buffer}) as a flat list of numbers."""
+    import array
+    import base64
+    a = array.array(_TYPECODES[field["dtype"]])
+    a.frombytes(base64.b64decode(field["buffer"]))
+    return a.tolist()
+
+
+def part_signatures(msg):
+    """{part path: signature} — what a reviewer means by 'this part changed'.
+
+    Tessellation is not bit-stable from one build to the next (vertex order,
+    last-digit noise), so hashing the mesh flags phantom diffs. The signature
+    uses what survives a rebuild of identical inputs: vertex / triangle counts,
+    the face-type histogram, the bounding box and mesh area rounded to a
+    thousandth, the placement chain, colour and alpha."""
+    data = msg.get("data") or {}
+    instances = data.get("instances") or []
+    out = {}
+
+    def mesh_sig(inst):
+        v = _numbers(inst["vertices"]) if "vertices" in inst else []
+        t = _numbers(inst["triangles"]) if "triangles" in inst else []
+        pts = [v[i:i + 3] for i in range(0, len(v) - 2, 3)]
+        bbox = [round(f(c[k] for c in pts), 3) for k in range(3) for f in (min, max)] if pts else []
+        area = 0.0
+        for i in range(0, len(t) - 2, 3):
+            a, b, c = pts[t[i]], pts[t[i + 1]], pts[t[i + 2]]
+            ab = [b[k] - a[k] for k in range(3)]
+            ac = [c[k] - a[k] for k in range(3)]
+            cx, cy, cz = ab[1] * ac[2] - ab[2] * ac[1], ab[2] * ac[0] - ab[0] * ac[2], ab[0] * ac[1] - ab[1] * ac[0]
+            area += (cx * cx + cy * cy + cz * cz) ** 0.5 / 2
+        faces = sorted(_numbers(inst["face_types"])) if "face_types" in inst else []
+        hist = {}
+        for ft in faces:
+            hist[str(ft)] = hist.get(str(ft), 0) + 1
+        return {"vertices": len(pts), "triangles": len(t) // 3, "bbox": bbox, "area": round(area, 2), "faces": hist}
+
+    def walk(node, chain):
+        chain = chain + [[[round(x, 4) for x in part] for part in node["loc"]] if node.get("loc") else None]
+        if "parts" in node:
+            for child in node["parts"]:
+                walk(child, chain)
+            return
+        shape = node.get("shape")
+        inst = instances[shape["ref"]] if isinstance(shape, dict) and isinstance(shape.get("ref"), int) else shape
+        body = {"mesh": mesh_sig(inst) if isinstance(inst, dict) else None, "loc": chain,
+                "color": node.get("color"), "alpha": node.get("alpha")}
+        path = node.get("id") or node.get("name", "part")
+        out[path] = hashlib.sha256(json.dumps(body, sort_keys=True, separators=(",", ":")).encode()).hexdigest()[:16]
+
+    if data.get("shapes"):
+        walk(data["shapes"], [])
+    return out
+
+
+def scene_diff(before, after):
+    """{changed, added, removed: [part paths], animation: bool} between two scene messages."""
+    a, b = part_signatures(before), part_signatures(after)
+    anim = lambda m: json.dumps({"animations": m.get("animations"), "config": m.get("config")}, sort_keys=True)
+    return {"changed": sorted(p for p in a if p in b and a[p] != b[p]),
+            "added": sorted(p for p in b if p not in a),
+            "removed": sorted(p for p in a if p not in b),
+            "animation": anim(before) != anim(after)}
+
+
+def bundle_scenes(path):
+    """project -> scene message for every scene in a cadview-scenes.tar.gz."""
     out = {}
     with tarfile.open(path, "r:gz") as tar:
         for m in tar.getmembers():
             name = Path(m.name).name
             if m.isfile() and name.startswith("scene-") and name.endswith(".json.gz"):
-                msg = json.loads(gzip.decompress(tar.extractfile(m).read()))
-                out[name[len("scene-"):-len(".json.gz")]] = geometry_key(msg)
+                out[name[len("scene-"):-len(".json.gz")]] = json.loads(gzip.decompress(tar.extractfile(m).read()))
     return out
 
 
@@ -118,10 +185,23 @@ def main(argv=None):
 
     changed = sorted(msgs)
     unchanged = []
+    scenes = {}
     if args.changed_vs:
-        before = bundle_keys(args.changed_vs)
-        changed = sorted(p for p in msgs if before.get(p) != geometry_key(msgs[p]))
+        before = bundle_scenes(args.changed_vs)
+        for p in sorted(msgs):
+            if p not in before:
+                scenes[p] = {"changed": [], "added": sorted(part_signatures(msgs[p])), "removed": [], "animation": False, "new_scene": True}
+                continue
+            scenes[p] = scene_diff(before[p], msgs[p])
+        changed = sorted(p for p, d in scenes.items()
+                         if d["changed"] or d["added"] or d["removed"] or d["animation"])
         unchanged = sorted(p for p in msgs if p not in changed)
+        for p in changed:
+            d = scenes[p]
+            bits = [f"{len(d[k])} {k}" for k in ("changed", "added", "removed") if d[k]]
+            names = ", ".join(q.rsplit("/", 1)[-1] for q in (d["changed"] + d["added"] + d["removed"])[:6])
+            print(f"{p}: {', '.join(bits) or 'animation'}{' — ' + names if names else ''}"
+                  + (" (animation changed)" if d["animation"] and bits else "") + (" (new scene)" if d.get("new_scene") else ""))
         print(f"changed: {', '.join(changed) or '-'}")
         print(f"unchanged: {', '.join(unchanged) or '-'}")
 
@@ -157,7 +237,7 @@ def main(argv=None):
         (out / "scenes.json").write_text(json.dumps({"projects": baked}))
         size = sum(f.stat().st_size for f in out.rglob("*") if f.is_file()) / 1e6
         print(f"static site in {out}/ — {len(baked)} scene(s), {size:.1f} MB")
-    (out / "changed.json").write_text(json.dumps({"changed": changed, "unchanged": unchanged}, indent=1))
+    (out / "changed.json").write_text(json.dumps({"changed": changed, "unchanged": unchanged, "scenes": scenes}, indent=1))
     return 0
 
 

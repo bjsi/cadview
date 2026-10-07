@@ -156,7 +156,15 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
         url = str(self.client.make_url('')).rstrip('/')
         rc = await asyncio.to_thread(bake.main, ['--single-file', '--changed-vs', str(bundle), '--url', url, str(out)])
         self.assertEqual(rc, 0)
-        self.assertEqual(json.loads((out / 'changed.json').read_text()), {'changed': ['moved'], 'unchanged': ['same']})
+        report = json.loads((out / 'changed.json').read_text())
+        self.assertEqual((report['changed'], report['unchanged']), (['moved'], ['same']))
+        self.assertEqual(report['scenes']['same'], {'changed': [], 'added': [], 'removed': [], 'animation': False})
+        self.assertTrue(report['scenes']['moved']['changed'])                    # the wider box, by part path
+        self.assertTrue(all(p.startswith('/Assembly/') for p in report['scenes']['moved']['changed']))
+        # the signature is what survives a rebuild: re-encoding the same mesh in a different vertex order is no change
+        from cadview import bake as _bake
+        same = box_scene(10)
+        self.assertEqual(_bake.scene_diff(same, json.loads(json.dumps(same))), {'changed': [], 'added': [], 'removed': [], 'animation': False})
         self.assertFalse((out / 'same.html').exists())
         page = (out / 'moved.html').read_text()
         self.assertNotIn('./vendor/', page)                    # nothing fetched: modules are data: URLs
