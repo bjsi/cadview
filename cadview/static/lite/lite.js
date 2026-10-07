@@ -1372,21 +1372,29 @@ hud.href = document.querySelector("meta[name=lite-stamp]") ? "/" : "./";
 let lastReceivedAt = null;
 
 async function fetchScene() {
-    const url = "/api/scene" + (project ? "?name=" + encodeURIComponent(project) : "");
     const t0 = performance.now();
-    let resp;
-    try { resp = await fetch(url, { cache: "no-store" }); } catch { resp = null; }
-    if (!resp || !resp.ok) {
-        // static deployment (rule 2: no server, still a full viewer): a
-        // baked scene.json next to the page, or scenes/<project>.json on
-        // a multi-scene site (page at <project>/, base href ../)
-        for (const candidate of ["./scene.json", `./scenes/${encodeURIComponent(project)}.json`]) {
-            try { resp = await fetch(candidate, { cache: "no-store" }); } catch { resp = null; }
-            if (resp && resp.ok) break;
+    let text;
+    if (window.CADVIEW_INLINE_SCENE) {
+        // a single-file bake (python -m cadview.bake --single-file): the
+        // scene is gzipped + base64 inside this very page, no server at all
+        const bytes = Uint8Array.from(atob(window.CADVIEW_INLINE_SCENE), (c) => c.charCodeAt(0));
+        text = await new Response(new Blob([bytes]).stream().pipeThrough(new DecompressionStream("gzip"))).text();
+    } else {
+        const url = "/api/scene" + (project ? "?name=" + encodeURIComponent(project) : "");
+        let resp;
+        try { resp = await fetch(url, { cache: "no-store" }); } catch { resp = null; }
+        if (!resp || !resp.ok) {
+            // static deployment (rule 2: no server, still a full viewer): a
+            // baked scene.json next to the page, or scenes/<project>.json on
+            // a multi-scene site (page at <project>/, base href ../)
+            for (const candidate of ["./scene.json", `./scenes/${encodeURIComponent(project)}.json`]) {
+                try { resp = await fetch(candidate, { cache: "no-store" }); } catch { resp = null; }
+                if (resp && resp.ok) break;
+            }
+            if (!resp || !resp.ok) { emptyMsg.textContent = "nothing pushed for " + (project || "any project") + " yet"; return false; }
         }
-        if (!resp || !resp.ok) { emptyMsg.textContent = "nothing pushed for " + (project || "any project") + " yet"; return false; }
+        text = await resp.text();
     }
-    const text = await resp.text();
     timings.download_ms = performance.now() - t0;
     const t1 = performance.now();
     const msg = JSON.parse(text);

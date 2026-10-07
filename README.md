@@ -96,6 +96,15 @@ hidden frame of whatever cadview page is open — any view, any part framed,
 any animation time — and the page the person is looking at never changes.
 `GET /api/parts?name=<project>` gives positions without a picture.
 
+## Review pages
+
+`python -m cadview.bake --single-file out/` writes one self-contained
+`<scene>.html` per scene — viewer, three.js and the scene inlined; opens
+from a file or an attachment with full orbit / part tree / hide / measure /
+animation. `--changed-vs cadview-scenes.tar.gz` keeps only scenes whose
+geometry differs from a bundle (what a PR changed). Without `--single-file`
+it bakes a static multi-scene site (the demo site is one).
+
 ## More
 
 `docs/DETAILS.md` — revision history, re-run/watch of pushing modules,

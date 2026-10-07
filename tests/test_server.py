@@ -138,6 +138,33 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
         await helper.close()
         await page.close()
 
+    async def test_bake_single_file_pages_and_changed_vs_bundle(self):
+        import base64, gzip, io, tarfile
+        from cadview import bake
+        await self.push(width=10, project='same')
+        await self.push(width=10, project='moved')
+        before = {'same': box_scene(10), 'moved': box_scene(11)}    # main's bundle: 'moved' differs
+        bundle = Path(self.tmp.name) / 'cadview-scenes.tar.gz'
+        with tarfile.open(bundle, 'w:gz') as tar:
+            for p, msg in before.items():
+                data = gzip.compress(json.dumps(msg).encode())
+                info = tarfile.TarInfo(f'scene-{p}.json.gz')
+                info.size = len(data)
+                tar.addfile(info, io.BytesIO(data))
+        out = Path(self.tmp.name) / 'review'
+        url = str(self.client.make_url('')).rstrip('/')
+        rc = await asyncio.to_thread(bake.main, ['--single-file', '--changed-vs', str(bundle), '--url', url, str(out)])
+        self.assertEqual(rc, 0)
+        self.assertEqual(json.loads((out / 'changed.json').read_text()), {'changed': ['moved'], 'unchanged': ['same']})
+        self.assertFalse((out / 'same.html').exists())
+        page = (out / 'moved.html').read_text()
+        self.assertNotIn('./vendor/', page)                    # nothing fetched: modules are data: URLs
+        self.assertIn('"three-core": "data:text/javascript;base64,', page)
+        b64 = page.split('window.CADVIEW_INLINE_SCENE = "')[1].split('"')[0]
+        inline = json.loads(gzip.decompress(base64.b64decode(b64)))
+        self.assertEqual(inline['data'], box_scene(10)['data'])
+        self.assertNotIn('source_file', inline['meta'])          # push-side meta stripped
+
     def test_client_scene_name_comes_from_the_nearest_manifest(self):
         from cadview import client
         root = Path(self.tmp.name) / 'repo'
