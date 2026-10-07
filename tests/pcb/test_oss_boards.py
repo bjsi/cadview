@@ -14,8 +14,8 @@ The boards were picked as a stress test (parts on both sides, rotations off the 
 trapezoid pads, arc / bezier / polygon outlines, cutouts, 100+ footprints from a dozen libraries, a 4-layer board).  What a
 board has is DETECTED from the file (`_features`) and checked against what it was picked for (BOARDS).  Where a feature is
 one the DSL cannot express yet, GAPS names the test it breaks and the board's test is a strict xfail with that reason -
-the gap list is the point; a board is never dropped for it.  Bottom-side parts are excluded from the pad / drill
-comparisons (so the top side of such a board is still proven exactly) and pinned by `test_bottom_side_parts`.
+the gap list is the point; a board is never dropped for it.  Bottom-side parts take part in every comparison (the DSL
+mirrors them the way KiCad's flip stores them) and `test_bottom_side_parts` reports them on their own as well.
 
 The regenerated board uses the footprints from the KiCad library installed here; the original embeds the footprints
 it was drawn with.  Where those differ the mismatch is reported pad by pad - it is library drift, not a DSL error,
@@ -58,15 +58,8 @@ BOARDS = {
 
 # feature the DSL cannot express -> (tests it breaks, why).  Strict: when the DSL learns it, the xfail turns into a failure here.
 GAPS = {
-    "bottom-side footprints": (("test_bottom_side_parts",),
-                               "kicad_pcb() writes every footprint on F.Cu (Placed.layer is ignored); a bottom-side part needs layer B.Cu and the "
-                               "library tree the way KiCad stores a flipped footprint: pad y -> -y, pad angles negated, F.<layer> <-> B.<layer>"),
-    "inner copper layers": (("test_layer_stack",),
-                            "the DSL is 2-layer: F.Cu / B.Cu only in the layer table, no In1.Cu / In2.Cu copper"),
-    "bezier Edge.Cuts": (("test_outline_matches",),
-                         "gr_curve (cubic bezier) outline segments: kicad_pcb() writes every edge that is not a line or a full circle as a 3-point gr_arc"),
-    "circular Edge.Cuts cutouts": (("test_outline_matches", "test_drill_table_matches"),
-                                   "a circle inside the outline becomes an NPTH footprint (Board.holes), not a gr_circle on Edge.Cuts"),
+    # every feature the nine boards were picked for is expressed now (bottom-side footprints, inner copper layers, bezier Edge.Cuts,
+    # circular Edge.Cuts cutouts - closed 2026-10-07); a new fixture's gap goes here as  feature: ((tests...,), why)
 }
 
 
@@ -122,6 +115,31 @@ _AT_INLINE = re.compile(r"^(\t\t\((?:pad|fp_text) .*?\(at [-\d.]+ [-\d.]+)(?: ([
 _STRIP = re.compile(r"^\t\t(?:\(at [-\d. ]+\)|\(path \"[^\"]*\"\)|\(sheetname \"[^\"]*\"\)|\(sheetfile \"[^\"]*\"\))\n"
                     r"|\s*\((?:net (?:\d+ )?\"[^\"]*\"|pinfunction \"[^\"]*\"|pintype \"[^\"]*\")\)", re.M)
 _INDENT = re.compile(r"^((?:  )+)", re.M)
+_XY = re.compile(r"\((at|start|end|mid|center|xy|offset|rect_delta) (-?[\d.]+) (-?[\d.]+)((?: -?[\d.]+)?)((?: unlocked)?)\)")
+_LAYER = re.compile(r'"([FB])\.')
+_CORNER = {"top_left": "bottom_left", "bottom_left": "top_left", "top_right": "bottom_right", "bottom_right": "top_right"}
+
+
+def _fmt(v: float) -> str:
+    s = f"{v:.6f}".rstrip("0").rstrip(".")
+    return "0" if s in ("-0", "") else s
+
+
+def _unflip(body: str) -> str:
+    """a footprint block KiCad stored on B.Cu, mirrored back to the way its library file has it (the inverse of FOOTPRINT::Flip,
+    top/bottom): every y and angle negated (pads, texts, fp_* graphics, custom-pad primitives, drill offsets), F.* <-> B.*
+    layers, chamfer corners top <-> bottom, text un-mirrored.  Textual, so the block stays KiCad's own text otherwise."""
+    def xy(m):
+        ang = m.group(4)
+        if ang and m.group(1) == "at":
+            ang = " " + _fmt(-float(ang))
+        return f"({m.group(1)} {m.group(2)} {_fmt(-float(m.group(3)))}{ang}{m.group(5)})"
+    body = _XY.sub(xy, body)
+    body = _LAYER.sub(lambda m: '"B.' if m.group(1) == "F" else '"F.', body)
+    body = re.sub(r"\((chamfer(?: \w+)+)\)", lambda m: "(" + " ".join(_CORNER.get(w, w) for w in m.group(1).split()) + ")", body)
+    body = re.sub(r"\(justify mirror\)\s*", "", body)
+    body = re.sub(r"\(justify ([^)]*?) mirror\)", r"(justify \1)", body)
+    return body
 
 
 def _footprint_library(rec: kp.BoardRec, path: str, dest: pathlib.Path, installed_root: str | None = None) -> set:
@@ -132,7 +150,8 @@ def _footprint_library(rec: kp.BoardRec, path: str, dest: pathlib.Path, installe
     parentheses) and only what a board instance adds is removed: the placement, path / sheet, the nets / pin functions
     on pads; pad and text angles (absolute in a board, and omitted when 0) go back to the footprint frame.  A footprint
     placed on both sides is taken from a top-side instance (KiCad stores a flipped footprint mirrored); one that only
-    ever sits on the bottom is written as stored.  KiCad 6 / 7 files indent with two spaces: normalised to tabs first."""
+    ever sits on the bottom is mirrored back to its library form (`_unflip`) - the DSL flips it again when it places it
+    on the bottom.  KiCad 6 / 7 files indent with two spaces: normalised to tabs first."""
     text = open(path).read()
     if "\n  (footprint " in text:
         text = _INDENT.sub(lambda m: "\t" * (len(m.group(1)) // 2), text)
@@ -174,6 +193,8 @@ def _footprint_library(rec: kp.BoardRec, path: str, dest: pathlib.Path, installe
         body = _STRIP.sub("", block)
         unrot = lambda m: f"{m.group(1)} {(float(m.group(2) or 0) - fp.rot) % 360:g})"
         body = _AT_INLINE.sub(unrot, _AT3.sub(unrot, body))
+        if fp.layer == "B.Cu":
+            body = _unflip(body)
         body = body.replace(f'(footprint "{name}"', f'(footprint "{fname}"', 1)
         (d / f"{fname}.kicad_mod").write_text(body.replace("\n\t", "\n")[1:])
     return from_installed
@@ -260,25 +281,6 @@ def _report(oss, layer, matched, left, right, extra=""):
     return line
 
 
-def _drilled(rec: kp.BoardRec, refs: set) -> list:
-    """gerber-frame positions of every drilled pad of the footprints `refs` (as that file stores them)"""
-    out = []
-    for fp in rec.footprints:
-        if fp.ref in refs:
-            for p in fp.pads:
-                if p.drill:
-                    x, y = kp.pad_abs(fp, p)
-                    out.append((x, -y))
-    return out
-
-
-def _without_holes_at(records: list, pts: list, tol=0.05) -> list:
-    """drill records whose hole (or slot midpoint) is not within `tol` of any point in `pts`"""
-    def at(r):
-        return (r[1], r[2]) if r[0] == "hole" else ((r[1] + r[3]) / 2, (r[2] + r[4]) / 2)
-    return [r for r in records if not any(abs(at(r)[0] - x) < tol and abs(at(r)[1] - y) < tol for x, y in pts)]
-
-
 # ---------------------------------------------------------------------------------------------------- tests ----
 def test_fixture_matches_sources(oss):
     """the fixture is byte-for-byte the upstream file SOURCES.md says it is"""
@@ -312,8 +314,6 @@ def test_outline_matches(oss):
 
 
 def test_drill_table_matches(oss):
-    skip_a = _drilled(oss["rec"], oss["bottom"])                       # bottom-side parts are pinned by test_bottom_side_parts
-    skip_b = _drilled(oss["regen_rec"], oss["bottom"])
     for kind in ("pth", "npth"):
         a = kp.read_drills(oss["a"][kind]) if oss["a"][kind] else []
         b = kp.read_drills(oss["b"][kind]) if oss["b"][kind] else []
@@ -321,11 +321,8 @@ def test_drill_table_matches(oss):
         via_holes = [("hole", x, y, d) for x, y, d in oss["vias"]]
         if kind == "pth":
             _, _, a = kp.match_multisets(via_holes, a, TOL, key=lambda r: r[0])   # right = the original's holes that are not vias
-        na, nb = len(a), len(b)
-        a, b = _without_holes_at(a, skip_a), _without_holes_at(b, skip_b)
         matched, left, right = kp.match_multisets(a, b, TOL, key=lambda r: r[0])
-        msg = _report(oss, kind.upper() + " drill", matched, left, right,
-                      extra=(f" (excluded: {len(via_holes)} via holes" if kind == "pth" else " (excluded:") + f", bottom-side parts' holes {na - len(a)} / {nb - len(b)})")
+        msg = _report(oss, kind.upper() + " drill", matched, left, right, extra=f" (excluded: {len(via_holes)} via holes)" if kind == "pth" else "")
         drift_ok = oss["variant"] == "library" and all(_hole_near_drift_pad(oss, h) for h in left + right)
         assert (not left and not right) or drift_ok, msg + f"\n  original only: {left[:6]}\n  DSL only: {right[:6]}"
 
@@ -351,14 +348,14 @@ def test_pad_flashes_match(oss, layer):
     B = kp.read_copper(oss["b"][layer])
     bottom = oss["bottom"]
     vias = [f for f in A["flashes"] if f.ref == ""]                    # via flashes carry no .P (ref, pad) attribute
-    a = [_SIG(f) for f in A["flashes"] if f.ref != "" and f.ref not in bottom]
-    b = [_SIG(f) for f in B["flashes"] if f.ref not in bottom]
+    a = [_SIG(f) for f in A["flashes"] if f.ref != ""]
+    b = [_SIG(f) for f in B["flashes"]]
     assert all(f.ref for f in B["flashes"]), "the re-expression must carry no vias"
     matched, left, right = kp.match_multisets(a, b, TOL, key=lambda r: (r[0], r[1]))
     lname = {"top": "F.Cu", "bottom": "B.Cu"}[layer]
     msg = _report(oss, lname + " pads", matched, left, right,
-                  extra=f" (excluded: original {A['lines']} track segments + {A['arcs']} arcs + {A['regions']} zone regions + {len(vias)} vias"
-                        f"{f' + {len(bottom)} bottom-side parts' if bottom else ''}; DSL {B['lines']}/{B['arcs']}/{B['regions']}/0)")
+                  extra=f" (excluded: original {A['lines']} track segments + {A['arcs']} arcs + {A['regions']} zone regions + {len(vias)} vias; "
+                        f"DSL {B['lines']}/{B['arcs']}/{B['regions']}/0; {sum(1 for r in a if r[0] in bottom)} flashes of bottom-side parts included)")
     detail = "\n".join(f"  original only: {r[:8]} {r[8:]}" for r in left[:5]) + "\n" + "\n".join(f"  DSL only: {r[:8]} {r[8:]}" for r in right[:5])
     assert B["lines"] == 0 and B["arcs"] == 0, "the re-expression must carry no copper routing"   # regions: fp_poly copper inside footprints is allowed
     drift = set(oss["drift"])
@@ -374,25 +371,32 @@ def test_pad_flashes_match(oss, layer):
     else:
         assert not left and not right, msg + "\n" + detail
     # the net attribute on every pad flash agrees too (pad-by-pad netlist through the Gerber X2 attributes)
-    an = sorted((f.ref, f.pad, f.net) for f in A["flashes"] if f.ref != "" and f.ref not in bottom and (f.ref, f.pad) not in drift)
-    bn = sorted((f.ref, f.pad, f.net) for f in B["flashes"] if f.ref not in bottom and (f.ref, f.pad) not in drift)
+    an = sorted((f.ref, f.pad, f.net) for f in A["flashes"] if f.ref != "" and (f.ref, f.pad) not in drift)
+    bn = sorted((f.ref, f.pad, f.net) for f in B["flashes"] if (f.ref, f.pad) not in drift)
     assert an == bn
 
 
 def test_bottom_side_parts(oss):
-    """the parts the original places on B.Cu are on B.Cu in the regenerated board, with every pad flash where KiCad put it"""
+    """the parts the original places on B.Cu are on B.Cu in the regenerated board, with every pad flash where KiCad put it
+    (on both copper layers: a bottom part's THT pads flash on F.Cu too).  In the `library` variant every mismatch must be a
+    pad whose embedded footprint differs from the installed one, as in test_pad_flashes_match."""
     bottom = oss["bottom"]
     if not bottom:
         pytest.skip("no bottom-side parts on this board")
     layers = {fp.ref: fp.layer for fp in oss["regen_rec"].footprints}
     wrong = sorted(r for r in bottom if layers.get(r) != "B.Cu")
     assert not wrong, f"{len(wrong)} of {len(bottom)} bottom-side parts are not on B.Cu in the DSL's board: {wrong[:8]}"
+    total = 0
     for layer in ("top", "bottom"):
         a = [_SIG(f) for f in kp.read_copper(oss["a"][layer])["flashes"] if f.ref in bottom]
         b = [_SIG(f) for f in kp.read_copper(oss["b"][layer])["flashes"] if f.ref in bottom]
         matched, left, right = kp.match_multisets(a, b, TOL, key=lambda r: (r[0], r[1]))
-        msg = _report(oss, f"bottom-side parts on {layer}", matched, left, right)
-        assert not left and not right, msg
+        unexplained = {(r[0], r[1]) for r in left + right} - set(oss["drift"])
+        msg = _report(oss, f"bottom-side parts on {layer}", matched, left, right,
+                      extra=f" ({len(set(oss['drift']) & {(r[0], r[1]) for r in left + right})} library-drift pads)" if oss["variant"] == "library" else "")
+        assert not unexplained, msg + f"\n  original only: {left[:5]}\n  DSL only: {right[:5]}"
+        total += matched
+    assert total > 0
 
 
 def test_netlists_match_pad_by_pad(oss):

@@ -350,10 +350,10 @@ async function snapshot() {
             const byName = animClips.findIndex((c) => c.name === p.clip);
             loadClip(p.clip == null ? 0 : byName >= 0 ? byName : Math.max(0, +p.clip || 0));
             let t = parseFloat(p.t) || 0;
-            if (p.chapter != null) {   // chapter=<name>: the shot at that chapter's time, with its camera
+            if (p.chapter != null) {   // chapter=<name>: its camera, and its start time unless t= says otherwise
                 const want = String(p.chapter).toLowerCase();
                 const ch = (anim?.chapters || []).find((c) => c.name.toLowerCase() === want);
-                if (ch) { t = ch.t; chapterCam = ch.camera || null; }
+                if (ch) { chapterCam = ch.camera || null; if (p.t == null || p.t === "") t = ch.t; }
             }
             applyAnimTime(t);
             modelGroup.updateMatrixWorld(true);

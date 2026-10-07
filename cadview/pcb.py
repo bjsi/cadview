@@ -1,4 +1,4 @@
-"""cadview.pcb — a 2-layer PCB laid out from build123d, written out for KiCad, tscircuit and JLCPCB.
+"""cadview.pcb — a PCB laid out from build123d, written out for KiCad, tscircuit and JLCPCB.
 
 The board outline, holes and cutouts are read off a build123d Face (a plate's underside, a box floor, ...); footprints
 come from KiCad's own libraries on disk (parsed here, no KiCad binary needed); parts are placed in the CAD's frame; nets
@@ -16,9 +16,24 @@ footprints' STEP models on it, so it sits in the assembly without a round trip.
 
 Units mm, Z up; Circuit JSON is y-up too, KiCad footprints are y-down and are flipped on read.  Implemented: smd and
 through-hole pads (rect / roundrect / oval / circle), rotations in multiples of 90 deg, circle holes, polygon cutouts,
-rect keepouts, copper pours, hand traces + vias, silkscreen text, 2 layers; `kicad_sch()` writes a
-schematic (global labels per net) and `check_netlist()` proves it against the board.  Needs build123d; shapely for outlines
-(`pip install cadview[pcb]`); KiCad's footprint + 3D libraries on disk (KICAD_FOOTPRINTS / KICAD_3DMODELS).
+outline edges as KiCad's own items (lines, arcs, circles, cubic beziers - `gr_curve`; other splines approximated by cubic
+beziers span by span, ellipses sampled), rect keepouts, copper pours, hand traces + vias, silkscreen text, 2 / 4 / 6 copper
+layers (`Board(layers=4)`: In1.Cu .. in the layer table and stackup, pours and traces on `layer="In1.Cu"`, through vias), parts
+on either side; `kicad_sch()` writes a schematic (global labels per net) and `check_netlist()` proves it against the board.
+Needs build123d; shapely for outlines (`pip install cadview[pcb]`); KiCad's footprint + 3D libraries on disk
+(KICAD_FOOTPRINTS / KICAD_3DMODELS).
+
+Outline, holes, cutouts.  The Face's outer wire is the board edge (Edge.Cuts: `gr_line` / `gr_arc` per CAD edge).  An inner
+wire is a cutout on Edge.Cuts too (`gr_circle` for a full circle, lines / arcs otherwise) - except that a full circle is,
+by default, a non-plated drill instead (`Board(..., inner_circles="npth")`: a `cadview:NPTH_<d>mm` footprint H1.. in the
+drill file, as a CAD mounting hole should be made; `inner_circles="cutout"` keeps it on Edge.Cuts as a routed opening).
+`Board.hole(at, d)` adds an NPTH explicitly.
+
+Sides.  `place(..., layer="bottom")` puts a part on the back the way KiCad flips one (top/bottom flip, FOOTPRINT::Flip):
+`(layer "B.Cu")`, pad y mirrored in the footprint frame, pad and text angles negated, every F.* layer its B.* twin, the
+footprint at `(at x -y rot)` - so `rot` is the angle KiCad shows and `kicad-cli pcb export pos` / the JLC CPL report for the
+part.  `Placed.pad_xy()` mirrors the same way, so Circuit JSON, the CPL and `solid()` (the STEP model turned under the board)
+agree with the Gerbers.
 """
 from __future__ import annotations
 
@@ -82,6 +97,34 @@ def _kv(node, key, default=None):
     for n in node:
         if isinstance(n, list) and n and n[0] == key: return n
     return default
+
+
+_FLIP_LAYER = {f"{a}.{s}": f"{b}.{s}" for a, b in (("F", "B"), ("B", "F")) for s in ("Cu", "Paste", "Mask", "SilkS", "Fab", "CrtYd", "Adhes")}
+_FLIP_CORNER = {"top_left": "bottom_left", "bottom_left": "top_left", "top_right": "bottom_right", "bottom_right": "top_right"}
+
+
+def _flip_tree(n):
+    """Mirror a footprint tree in place the way KiCad stores a footprint flipped to the back (FOOTPRINT::Flip, top/bottom):
+    every y negated (pad and text positions, drill offsets, fp_* graphics, custom-pad primitives, zone polygons), every
+    angle negated, F.* <-> B.* layers, chamfered corners top <-> bottom, text mirrored.  Angles are still footprint-relative
+    here; the caller adds the part's rotation afterwards.  KiCad renders a pad at fp_pos + R(fp_angle) * local with no
+    mirroring of its own, so this stored mirror is what puts a back-side pad where a part turned over sits."""
+    if not isinstance(n, list) or not n: return
+    for c in n[1:]: _flip_tree(c)
+    head = n[0]
+    if head in ("at", "start", "end", "mid", "center", "xy", "offset", "rect_delta") and len(n) > 2 and isinstance(n[2], float):
+        n[2] = -n[2] + 0.0
+        if head == "at" and len(n) > 3 and isinstance(n[3], float): n[3] = (-n[3]) % 360
+    elif head == "layer" and len(n) > 1: n[1] = Q(_FLIP_LAYER.get(n[1], n[1]))
+    elif head == "layers": n[1:] = [Q(_FLIP_LAYER.get(l, l)) for l in n[1:]]
+    elif head == "chamfer": n[1:] = [_FLIP_CORNER.get(c, c) for c in n[1:]]
+    elif head == "effects":
+        j = _kv(n, "justify")
+        if j is None: n.append(["justify", "mirror"])
+        elif "mirror" in j[1:]:
+            j.remove("mirror")
+            if len(j) == 1: n.remove(j)
+        else: j.append("mirror")
 
 
 @dataclass
@@ -221,6 +264,41 @@ def _circle_of(wire: Wire):
     return None
 
 
+def _cubic_beziers(e: Edge):
+    """A BEZIER / BSPLINE edge as cubic beziers: a list of 4-pole [(x, y) ...] runs in the curve's own direction (the way it was
+    drawn - KiCad's polyline of a bezier depends on it, so a round trip keeps it), each one a KiCad `gr_curve`.  The edge's
+    parameter range goes through OCC's curve -> BSpline -> per-span bezier conversion (exact for a non-rational curve of degree
+    <= 3: a cubic bezier comes back as itself, a quadratic / line is degree-elevated); None when the curve is rational or above
+    cubic (ellipses, high-degree splines), which the caller samples into lines instead."""
+    from OCP.Geom import Geom_TrimmedCurve
+    from OCP.GeomConvert import GeomConvert, GeomConvert_BSplineCurveToBezierCurve
+    ad = e.geom_adaptor()
+    bs = GeomConvert.CurveToBSplineCurve_s(Geom_TrimmedCurve(ad.Curve().Curve(), ad.FirstParameter(), ad.LastParameter()))
+    if bs.IsRational() or bs.Degree() > 3: return None
+    cv = GeomConvert_BSplineCurveToBezierCurve(bs)
+    out = []
+    for k in range(1, cv.NbArcs() + 1):
+        c = cv.Arc(k)
+        P = [(c.Pole(i).X(), c.Pole(i).Y()) for i in range(1, c.NbPoles() + 1)]
+        while len(P) < 4:                                                          # degree elevation: Q_i = (i P_{i-1} + (n+1-i) P_i) / (n+1)
+            n = len(P) - 1
+            P = [P[0]] + [((i * P[i - 1][0] + (n + 1 - i) * P[i][0]) / (n + 1), (i * P[i - 1][1] + (n + 1 - i) * P[i][1]) / (n + 1)) for i in range(1, n + 1)] + [P[-1]]
+        out.append(P)
+    return out
+
+
+def _cu(layer: str) -> str:
+    """a copper layer as KiCad names it: 'top' / 'bottom' -> F.Cu / B.Cu, 'in1' -> In1.Cu, a KiCad name ('In2.Cu') as given"""
+    if layer in ("top", "bottom"): return {"top": "F.Cu", "bottom": "B.Cu"}[layer]
+    return layer if layer.endswith(".Cu") else layer.capitalize() + ".Cu"
+
+
+def _cj_layer(layer: str) -> str:
+    """the same layer as Circuit JSON names it: top / bottom / inner1 / inner2 ..."""
+    k = _cu(layer)
+    return {"F.Cu": "top", "B.Cu": "bottom"}.get(k, "inner" + k[2:-3])
+
+
 # ------------------------------------------------------------------------------- the board ----
 @dataclass
 class Placed:
@@ -236,22 +314,40 @@ class Placed:
     symbol: tuple | None = None    # ("Lib", "Name") in KiCad's symbol libraries, for the schematic
 
     def pad_xy(self, pad: Pad):
+        """panel position of a pad: the part's origin + the pad's footprint-frame position turned by `rot`; a bottom-side part is
+        turned over about its x axis first (pad y mirrored), the same flip KiCad stores"""
         a = math.radians(self.rot); c, s = math.cos(a), math.sin(a)
-        return (round(self.x + pad.x * c - pad.y * s, 4), round(self.y + pad.x * s + pad.y * c, 4))
+        py = -pad.y if self.layer == "bottom" else pad.y
+        return (round(self.x + pad.x * c - py * s, 4), round(self.y + pad.x * s + py * c, 4))
+
+    def pad_layers(self, pad: Pad) -> tuple:
+        """the copper sides of a pad on this part: a bottom-side part's F.* pads are on the bottom"""
+        if self.layer != "bottom": return pad.layers
+        return tuple(sorted({"top": "bottom", "bottom": "top"}[l] for l in pad.layers))
 
 
 class Board:
-    """A 2-layer PCB whose outline / holes / cutouts come from a build123d Face lying in a Z plane."""
+    """A PCB whose outline / holes / cutouts come from a build123d Face lying in a Z plane.  `layers`: copper layers, 2 / 4 / 6
+    (F.Cu, In1.Cu .., B.Cu - `self.copper` in stack order); pours and hand traces take any of them by name."""
 
-    def __init__(self, face: Face, thickness=1.6, name="board", z=0.0):
+    def __init__(self, face: Face, thickness=1.6, name="board", z=0.0, inner_circles="npth", layers=2):
+        """`inner_circles`: what a full-circle inner wire of the Face is - "npth" (default): a non-plated drill (`Board.holes`,
+        a `cadview:NPTH_<d>mm` footprint in the drill file - a CAD mounting hole); "cutout": a `gr_circle` on Edge.Cuts like
+        any other inner wire (a routed opening).  Every other inner wire is an Edge.Cuts cutout.  `layers`: 2 / 4 / 6 copper."""
+        if inner_circles not in ("npth", "cutout"): raise ValueError(f"inner_circles: 'npth' or 'cutout', not {inner_circles!r}")
         self.name, self.thickness, self.z = name, thickness, z
+        if int(layers) not in (2, 4, 6): raise ValueError(f"layers={layers!r}: 2, 4 or 6 copper layers")
+        self.layers = int(layers)
+        self.copper = ["F.Cu"] + [f"In{i}.Cu" for i in range(1, self.layers - 1)] + ["B.Cu"]
         self.outline = _poly_from_wire(face.outer_wire())
-        self.holes, self.cutouts = [], []
+        self.holes, self.cutouts, self.circle_cutouts = [], [], []           # (x, y, d) NPTH; polygons; (x, y, d) of the circular cutouts
         self.edge_wires = [face.outer_wire()]                                   # exact edges for KiCad's Edge.Cuts
         for w in face.inner_wires():
             c = _circle_of(w)
-            if c: self.holes.append(c)
-            else: self.cutouts.append(_poly_from_wire(w)); self.edge_wires.append(w)
+            if c and inner_circles == "npth": self.holes.append(c)
+            else:
+                self.cutouts.append(_poly_from_wire(w)); self.edge_wires.append(w)
+                if c: self.circle_cutouts.append(c)
         xs, ys = [p[0] for p in self.outline], [p[1] for p in self.outline]
         self.bbox = (min(xs), min(ys), max(xs), max(ys))
         self.parts: list[Placed] = []
@@ -263,27 +359,41 @@ class Board:
         self.track_width, self.via_dims = 0.3, (0.6, 0.3)
 
     # --- authoring
-    def place(self, fp: Footprint, ref: str, at, rot=0.0, value="", mpn="", center_pads=True, lcsc="", note="", ref_at=None, symbol=None) -> Placed:
+    def place(self, fp: Footprint, ref: str, at, rot=0.0, value="", mpn="", center_pads=True, lcsc="", note="", ref_at=None, symbol=None, layer="top") -> Placed:
         """`at` is where the part's pad-bbox centre goes (KiCad footprints often have their origin on pin 1, e.g. the Pico THT one);
-        center_pads=False puts the footprint origin there instead."""
+        center_pads=False puts the footprint origin there instead.  layer="bottom": the part on the back, turned over about its
+        x axis (KiCad's flip); `rot` is then the angle KiCad shows for it, CCW as seen from the top."""
+        if layer not in ("top", "bottom"): raise ValueError(f"layer: 'top' or 'bottom', not {layer!r}")
         ox = oy = 0.0
         if center_pads and fp.pads:
             xs, ys = [q.x for q in fp.pads], [q.y for q in fp.pads]
             cx, cy = (min(xs) + max(xs)) / 2, (min(ys) + max(ys)) / 2
+            if layer == "bottom": cy = -cy
             a = math.radians(rot); ox, oy = -(cx * math.cos(a) - cy * math.sin(a)), -(cx * math.sin(a) + cy * math.cos(a))
-        p = Placed(ref, fp, round(at[0] + ox, 4), round(at[1] + oy, 4), rot % 360, value, mpn, lcsc=lcsc, note=note, ref_at=ref_at, symbol=symbol); self.parts.append(p); return p
+        p = Placed(ref, fp, round(at[0] + ox, 4), round(at[1] + oy, 4), rot % 360, value, mpn, layer, lcsc=lcsc, note=note, ref_at=ref_at, symbol=symbol); self.parts.append(p); return p
+
+    def hole(self, at, d):
+        """an explicit non-plated hole (NPTH drill, `cadview:NPTH_<d>mm` footprint) at a panel position - the same thing a
+        circular inner wire of the Face gives with inner_circles="npth\""""
+        self.holes.append((round(at[0], 4), round(at[1], 4), round(d, 4))); return self.holes[-1]
 
     def label(self, text, at, rot=0.0, size=1.0, layer="F.SilkS"):
         """silkscreen text (KiCad only; Circuit JSON gets a pcb_silkscreen_text)"""
         self.labels.append((text, (round(at[0], 4), round(at[1], 4)), rot % 360, size, layer))
 
     def pour(self, net="GND", layer="B.Cu"):
-        """a copper pour over the whole outline on one layer (KiCad zone; filled by `kicad-cli pcb drc --refill-zones --save-board`)"""
-        self.pours.append((net, layer))
+        """a copper pour over the whole outline on one layer ('top' / 'bottom' / 'F.Cu' / 'In1.Cu' ...; KiCad zone, filled by
+        `kicad-cli pcb drc --refill-zones --save-board`)"""
+        self.pours.append((net, self._layer(layer)))
 
     def trace(self, net, pts, layer="top", width=None):
         """hand-placed copper: a polyline on one layer (Circuit JSON pcb_trace, so the router sees it as an obstacle; KiCad segments)"""
-        self.manual.append(dict(net=net, layer=layer, width=width or self.track_width, pts=[(round(x, 4), round(y, 4)) for x, y in pts]))
+        self.manual.append(dict(net=net, layer=self._layer(layer), width=width or self.track_width, pts=[(round(x, 4), round(y, 4)) for x, y in pts]))
+
+    def _layer(self, layer: str) -> str:
+        """a copper layer name the board has, as given (top / bottom / F.Cu / B.Cu / In1.Cu / in1)"""
+        if _cu(layer) not in self.copper: raise ValueError(f"layer {layer!r}: this board's copper layers are {', '.join(self.copper)}")
+        return layer
 
     def via(self, net, at):
         self.vias.append((net, (round(at[0], 4), round(at[1], 4))))
@@ -292,7 +402,7 @@ class Board:
         """a short trace from an SMD pad out to a via (e.g. a top-layer GND pad down to the bottom pour); `toward` = (dx, dy) unit-ish"""
         p = next(p for p in self.parts if p.ref == ref); q = p.fp.pad(pad_number)
         x, y = p.pad_xy(q); n = math.hypot(*toward); dx, dy = toward[0] / n * length, toward[1] / n * length
-        self.trace(net, [(x, y), (x + dx, y + dy)], q.layers[0]); self.via(net, (x + dx, y + dy))
+        self.trace(net, [(x, y), (x + dx, y + dy)], p.pad_layers(q)[0]); self.via(net, (x + dx, y + dy))
 
     def hole_keepout(self, d_head):
         """keep copper off a d_head square around every mounting hole (the screw head / standoff face), both layers"""
@@ -335,7 +445,7 @@ class Board:
     def circuit_json(self) -> list:
         cx, cy = (self.bbox[0] + self.bbox[2]) / 2, (self.bbox[1] + self.bbox[3]) / 2
         els = [dict(type="pcb_board", pcb_board_id="pcb_board_0", center=dict(x=cx, y=cy), thickness=self.thickness,
-                    num_layers=2, material="fr4", shape="polygon", outline=[dict(x=x, y=y) for x, y in self.outline],
+                    num_layers=self.layers, material="fr4", shape="polygon", outline=[dict(x=x, y=y) for x, y in self.outline],
                     width=self.bbox[2] - self.bbox[0], height=self.bbox[3] - self.bbox[1])]
         for i, (x, y, d) in enumerate(self.holes):
             els.append(dict(type="pcb_hole", pcb_hole_id=f"pcb_hole_{i}", hole_shape="circle", hole_diameter=d, x=x, y=y))
@@ -354,23 +464,24 @@ class Board:
             els.append(dict(type="pcb_component", pcb_component_id=pc, source_component_id=sc, center=dict(x=p.x, y=p.y), layer=p.layer,
                             rotation=p.rot, width=round(max(xs) - min(xs) + 2, 3), height=round(max(ys) - min(ys) + 2, 3)))
             els.append(dict(type="cad_component", cad_component_id=f"cad_component_{pi}", pcb_component_id=pc, source_component_id=sc,
-                            position=dict(x=p.x, y=p.y, z=self.thickness / 2), rotation=dict(x=0, y=0, z=p.rot), layer=p.layer,
+                            position=dict(x=p.x, y=p.y, z=(-1 if p.layer == "bottom" else 1) * self.thickness / 2), rotation=dict(x=0, y=0, z=p.rot), layer=p.layer,
                             **({"model_step_url": "file://" + p.fp.model} if p.fp.model else {})))
             for qi, q in enumerate(p.fp.pads):
-                if not q.layers: continue                                       # paste-only pad: no copper, no port
+                layers = p.pad_layers(q)
+                if not layers: continue                                         # paste-only pad: no copper, no port
                 x, y = p.pad_xy(q)
                 if q.number:
                     sp, pp = f"source_port_{pi}_{qi}", f"pcb_port_{pi}_{qi}"
                     port_id[(p.ref, q.number)] = sp
                     els.append(dict(type="source_port", source_port_id=sp, source_component_id=sc, name=q.number, port_hints=[q.number],
                                     **({"pin_number": int(q.number)} if q.number.isdigit() else {})))
-                    els.append(dict(type="pcb_port", pcb_port_id=pp, source_port_id=sp, pcb_component_id=pc, x=x, y=y, layers=list(q.layers)))
+                    els.append(dict(type="pcb_port", pcb_port_id=pp, source_port_id=sp, pcb_component_id=pc, x=x, y=y, layers=list(layers)))
                 else:
                     pp = None
                 base = dict(pcb_component_id=pc, x=x, y=y, **({"pcb_port_id": pp, "port_hints": [q.number]} if pp else {}))
                 if q.kind == "smd":
                     shape = "circle" if q.shape == "circle" else "rect"
-                    el = dict(type="pcb_smtpad", pcb_smtpad_id=f"pcb_smtpad_{pi}_{qi}", shape=shape, layer=q.layers[0], **base)
+                    el = dict(type="pcb_smtpad", pcb_smtpad_id=f"pcb_smtpad_{pi}_{qi}", shape=shape, layer=layers[0], **base)
                     w, h = (q.h, q.w) if p.rot % 180 == 90 else (q.w, q.h)            # the part's rotation turns the pad too
                     el.update(dict(radius=q.w / 2) if shape == "circle" else dict(width=w, height=h))
                 elif q.kind == "np_thru_hole":
@@ -392,7 +503,7 @@ class Board:
         net_trace = {name: f"source_trace_{ni}" for ni, name in enumerate(self.nets)}
         for i, t in enumerate(self.manual):                                    # hand copper: a pcb_trace the router must avoid
             els.append(dict(type="pcb_trace", pcb_trace_id=f"pcb_trace_manual_{i}", source_trace_id=net_trace.get(t["net"]),
-                            route=[dict(route_type="wire", x=x, y=y, width=t["width"], layer=t["layer"]) for x, y in t["pts"]]))
+                            route=[dict(route_type="wire", x=x, y=y, width=t["width"], layer=_cj_layer(t["layer"])) for x, y in t["pts"]]))
         for i, (net, (x, y)) in enumerate(self.vias):
             els.append(dict(type="pcb_via", pcb_via_id=f"pcb_via_manual_{i}", x=x, y=y, outer_diameter=self.via_dims[0], hole_diameter=self.via_dims[1], layers=["top", "bottom"]))
         return els
@@ -402,6 +513,29 @@ class Board:
         return path
 
     # --- KiCad project (text an agent can edit, kicad-cli can check and export)
+    def _stackup(self) -> list:
+        """`(stackup ...)` for the setup block, the way KiCad 9 / 10 write the board stackup editor's result: silk / paste / mask,
+        the copper layers at 35 um with a dielectric between each pair (one core on a 2-layer board; prepreg - core - prepreg ..
+        inside, the outer prepregs 0.2 mm and the cores sharing the rest), summing to `thickness` with the two 10 um masks.
+        kicad-cli's STEP body is the dielectric sum, so a 4-layer board comes out the same thickness as a 2-layer one."""
+        cu_t, mask_t = 0.035, 0.01
+        n = self.layers - 1                                                     # dielectrics
+        rest = round(self.thickness - self.layers * cu_t - 2 * mask_t, 4)
+        if n == 1: diel = [("core", rest)]
+        else:
+            cores = n // 2
+            diel = [("prepreg", 0.2) if i % 2 == 0 else ("core", round((rest - (n - cores) * 0.2) / cores, 4)) for i in range(n)]
+        L = lambda name, kind, *rest: ["layer", Q(name), ["type", Q(kind)], *rest]
+        out = ["stackup", L("F.SilkS", "Top Silk Screen"), L("F.Paste", "Top Solder Paste"), L("F.Mask", "Top Solder Mask", ["thickness", mask_t])]
+        for i, name in enumerate(self.copper):
+            out.append(L(name, "copper", ["thickness", cu_t]))
+            if i < n:
+                kind, t = diel[i]
+                out.append(L(f"dielectric {i + 1}", kind, ["thickness", t], ["material", Q("FR4")], ["epsilon_r", 4.5], ["loss_tangent", 0.02]))
+        out += [L("B.Mask", "Bottom Solder Mask", ["thickness", mask_t]), L("B.Paste", "Bottom Solder Paste"), L("B.SilkS", "Bottom Silk Screen"),
+                ["copper_finish", Q("None")], ["dielectric_constraints", "no"]]
+        return out
+
     def kicad_pcb(self, traces=None) -> str:
         """A .kicad_pcb (format 20241229, loads in KiCad 9/10).  KiCad is y-DOWN: panel (x, y) -> (x, -y), angles negated, so
         `kicad-cli pcb export step` lands back in the panel frame.  `traces`: Circuit JSON pcb_trace / pcb_via elements (e.g. from
@@ -414,13 +548,15 @@ class Board:
         pad_net = {}                                                           # (ref, pad) -> net name
         for name, pins in self.nets.items():
             for k in pins: pad_net[k] = name
+        # the layer table as KiCad 9 / 10 number it (format 20241229): copper on the even ids - F.Cu 0, B.Cu 2, In1.Cu 4, In2.Cu 6 ... -
+        # listed in stack order, the technical layers on the odd ones
+        cu = [(0, "F.Cu")] + [(2 + 2 * i, f"In{i}.Cu") for i in range(1, self.layers - 1)] + [(2, "B.Cu")]
+        tech = ((13, "F.Paste"), (15, "B.Paste"), (5, "F.SilkS"), (7, "B.SilkS"), (1, "F.Mask"), (3, "B.Mask"), (17, "Dwgs.User"), (19, "Cmts.User"),
+                (25, "Edge.Cuts"), (27, "Margin"), (31, "F.CrtYd"), (29, "B.CrtYd"), (35, "F.Fab"), (33, "B.Fab"))
         root = ["kicad_pcb", ["version", 20241229.0], ["generator", Q("cadview.pcb")], ["generator_version", Q("0.1")],
                 ["general", ["thickness", self.thickness], ["legacy_teardrops", "no"]], ["paper", Q("A4")],
-                ["layers"] + [[float(i), Q(n), k] for i, n, k in ((0, "F.Cu", "signal"), (31, "B.Cu", "signal"), (34, "B.Paste", "user"), (35, "F.Paste", "user"),
-                                                                 (36, "B.SilkS", "user"), (37, "F.SilkS", "user"), (38, "B.Mask", "user"), (39, "F.Mask", "user"),
-                                                                 (40, "Dwgs.User", "user"), (41, "Cmts.User", "user"), (44, "Edge.Cuts", "user"), (45, "Margin", "user"),
-                                                                 (46, "B.CrtYd", "user"), (47, "F.CrtYd", "user"), (48, "B.Fab", "user"), (49, "F.Fab", "user"))],
-                ["setup", ["pad_to_mask_clearance", 0.0], ["allow_soldermask_bridges_in_footprints", "no"]],
+                ["layers"] + [[float(i), Q(n), "signal"] for i, n in cu] + [[float(i), Q(n), "user"] for i, n in tech],
+                ["setup", self._stackup(), ["pad_to_mask_clearance", 0.0], ["allow_soldermask_bridges_in_footprints", "no"]],
                 ["net", 0.0, Q("")]] + [["net", float(i), Q(n)] for n, i in net_id.items()]
         # footprints: the library tree, re-rooted at the part's position with nets on the pads
         import copy
@@ -430,8 +566,13 @@ class Board:
             body = [n for n in fp[2:] if not (isinstance(n, list) and n[0] in ("version", "generator", "generator_version"))]
             # KiCad angles are CCW as seen on its y-down screen, which is exactly a CCW angle in the y-up frame after the y flip:
             # KiCad abs = Rk(A)(px, -py) + (cx, -cy); negating y gives R(A)(px, py) + c, so A = rot (verified by DRC: -rot leaves every track dangling)
+            # A bottom-side part is the library tree mirrored as KiCad's flip stores it (_flip_tree) at the same (at x -y rot):
+            # KiCad abs = Rk(A)(px, py) + (cx, -cy) -> R(A)(px, -py) + c = Placed.pad_xy()
             a = p.rot % 360
-            out = [fp[0], fp[1], ["layer", Q("F.Cu")], U(), ["at", p.x, Y(p.y), a]]
+            bottom = p.layer == "bottom"
+            if bottom:
+                for n in body: _flip_tree(n)
+            out = [fp[0], fp[1], ["layer", Q("B.Cu" if bottom else "F.Cu")], U(), ["at", p.x, Y(p.y), a]]
             for n in body:
                 if not isinstance(n, list): out.append(n); continue
                 if n[0] == "layer": continue
@@ -440,7 +581,7 @@ class Board:
                 if n[0] in ("property", "fp_text"):                                   # text angles are absolute in the file: add the part's
                     at = _kv(n, "at")
                     if at: at[3:] = [((at[3] if len(at) > 3 else 0.0) + a) % 360]
-                    if n[0] == "property" and n[1] == "Reference" and p.ref_at and at: at[1:3] = [p.ref_at[0], -p.ref_at[1]]
+                    if n[0] == "property" and n[1] == "Reference" and p.ref_at and at: at[1:3] = [p.ref_at[0], p.ref_at[1] if bottom else -p.ref_at[1]]
                 if n[0] == "pad":
                     at = _kv(n, "at"); at[3:] = [((at[3] if len(at) > 3 else 0.0) + a) % 360]
                     net = pad_net.get((p.ref, str(n[1]).rstrip("0").rstrip(".") if isinstance(n[1], float) else n[1]))
@@ -455,18 +596,28 @@ class Board:
                          ["property", Q("Reference"), Q(f"H{i + 1}"), ["at", 0.0, 0.0, 0.0], ["layer", Q("F.SilkS")], ["hide", "yes"], U(), ["effects", ["font", ["size", 1.0, 1.0], ["thickness", 0.15]]]],
                          ["property", Q("Value"), Q(f"hole {_num(d)} mm from the CAD"), ["at", 0.0, 0.0, 0.0], ["layer", Q("F.Fab")], ["hide", "yes"], U(), ["effects", ["font", ["size", 1.0, 1.0], ["thickness", 0.15]]]],
                          ["pad", Q(""), "np_thru_hole", "circle", ["at", 0.0, 0.0], ["size", d, d], ["drill", d], ["layers", Q("*.Cu"), Q("*.Mask")], U()]])
-        # board edge + cutouts from the exact CAD edges
+        # board edge + cutouts from the exact CAD edges, each as KiCad's own item: gr_line, gr_arc (3-point), gr_circle, gr_curve
+        # (a cubic bezier's 4 control points; a spline is split into cubic spans); what is none of those (an ellipse) is sampled into lines
+        XY = lambda p, nd=4: [round(p.X, nd), Y(round(p.Y, nd))] if hasattr(p, "X") else [round(p[0], nd), Y(round(p[1], nd))]
+        edge = lambda kind, *geo: root.append([kind, *geo, stroke(), ["layer", Q("Edge.Cuts")], U()])
         for w in self.edge_wires:
-            for e in w.order_edges():
+            for e in w.edges():                                                 # not order_edges(): that rebuilds a wire-reversed edge's curve backwards
                 p0, p1 = e @ 0, e @ 1
                 if e.geom_type == GeomType.LINE:
-                    root.append(["gr_line", ["start", round(p0.X, 4), Y(round(p0.Y, 4))], ["end", round(p1.X, 4), Y(round(p1.Y, 4))], stroke(), ["layer", Q("Edge.Cuts")], U()])
+                    edge("gr_line", ["start", *XY(p0)], ["end", *XY(p1)])
                 elif e.geom_type == GeomType.CIRCLE and e.is_closed:
                     c = e.arc_center
-                    root.append(["gr_circle", ["center", round(c.X, 4), Y(round(c.Y, 4))], ["end", round(c.X + e.radius, 4), Y(round(c.Y, 4))], stroke(), ["fill", "none"], ["layer", Q("Edge.Cuts")], U()])
+                    root.append(["gr_circle", ["center", *XY(c)], ["end", round(c.X + e.radius, 4), Y(round(c.Y, 4))], stroke(), ["fill", "none"], ["layer", Q("Edge.Cuts")], U()])
+                elif e.geom_type == GeomType.CIRCLE:
+                    edge("gr_arc", ["start", *XY(p0)], ["mid", *XY(e @ 0.5)], ["end", *XY(p1)])
                 else:
-                    pm = e @ 0.5
-                    root.append(["gr_arc", ["start", round(p0.X, 4), Y(round(p0.Y, 4))], ["mid", round(pm.X, 4), Y(round(pm.Y, 4))], ["end", round(p1.X, 4), Y(round(p1.Y, 4))], stroke(), ["layer", Q("Edge.Cuts")], U()])
+                    runs = _cubic_beziers(e) if e.geom_type in (GeomType.BEZIER, GeomType.BSPLINE) else None
+                    if runs:
+                        for P in runs: edge("gr_curve", ["pts"] + [["xy", *XY(q, 6)] for q in P])      # 6 decimals: KiCad's own precision, so its polyline of the curve is the same
+                    else:
+                        n = max(2, int(e.length / 0.25))
+                        pts = [e @ (i / n) for i in range(n + 1)]
+                        for q0, q1 in zip(pts, pts[1:]): edge("gr_line", ["start", *XY(q0)], ["end", *XY(q1)])
         # keepouts: rule-area zones on both copper layers
         for i, (c, w, h, layers, why, pour) in enumerate(self.keepouts):
             x0, x1, y0, y1 = c[0] - w / 2, c[0] + w / 2, c[1] - h / 2, c[1] + h / 2
@@ -481,6 +632,7 @@ class Board:
             root.append(["gr_text", Q(text), ["at", x, Y(y), rot], ["layer", Q(layer)], U(), ["effects", ["font", ["size", size, size], ["thickness", round(size * 0.15, 3)]]]])
         # copper pours: one zone per (net, layer) over the whole outline, thermal reliefs; filled by kicad-cli drc --refill-zones --save-board
         for i, (net, layer) in enumerate(self.pours):
+            layer = _cu(layer)
             root.append(["zone", ["net", float(net_id[net])], ["net_name", Q(net)], ["layer", Q(layer)], U(), ["name", Q(f"{net} pour {layer}")], ["hatch", "edge", 0.5],
                          ["priority", 0.0], ["connect_pads", ["clearance", 0.3]], ["min_thickness", 0.25], ["filled_areas_thickness", "no"],
                          ["fill", "yes", ["thermal_gap", 0.4], ["thermal_bridge_width", 0.4], ["island_removal_mode", 0.0]],
@@ -489,8 +641,8 @@ class Board:
         for t in self.manual:
             nid = float(net_id.get(t["net"], 0))
             for (x0, y0), (x1, y1) in zip(t["pts"], t["pts"][1:]):
-                root.append(["segment", ["start", x0, Y(y0)], ["end", x1, Y(y1)], ["width", t["width"]], ["layer", Q("F.Cu" if t["layer"] == "top" else "B.Cu")], ["net", nid], U()])
-        for net, (x, y) in self.vias:
+                root.append(["segment", ["start", x0, Y(y0)], ["end", x1, Y(y1)], ["width", t["width"]], ["layer", Q(_cu(t["layer"]))], ["net", nid], U()])
+        for net, (x, y) in self.vias:                                          # through vias: F.Cu to B.Cu spans every inner layer too
             root.append(["via", ["at", x, Y(y)], ["size", self.via_dims[0]], ["drill", self.via_dims[1]], ["layers", Q("F.Cu"), Q("B.Cu")], ["net", float(net_id.get(net, 0))], U()])
         # routed copper
         trace_net = {}
@@ -503,7 +655,7 @@ class Board:
                 for r0, r1 in zip(pts, pts[1:]):
                     if r0.get("route_type") == "wire" and r1.get("route_type") == "wire" and r0["layer"] == r1["layer"]:
                         root.append(["segment", ["start", round(r0["x"], 4), Y(round(r0["y"], 4))], ["end", round(r1["x"], 4), Y(round(r1["y"], 4))], ["width", r0["width"]],
-                                     ["layer", Q("F.Cu" if r0["layer"] == "top" else "B.Cu")], ["net", nid], U()])
+                                     ["layer", Q(_cu(r0["layer"]))], ["net", nid], U()])
                 for r in pts:
                     if r.get("route_type") == "via" and "x" in r:
                         root.append(["via", ["at", round(r["x"], 4), Y(round(r["y"], 4))], ["size", self.via_dims[0]], ["drill", self.via_dims[1]], ["layers", Q("F.Cu"), Q("B.Cu")], ["net", nid], U()])
@@ -642,22 +794,26 @@ class Board:
         if color is None:
             color = Color(0.1, 0.4, 0.2)
         sk = Polygon(*self.outline, align=None)
-        for x, y, d in self.holes: sk -= Pos(x, y) * Circle(d / 2)
+        for x, y, d in self.holes + self.circle_cutouts: sk -= Pos(x, y) * Circle(d / 2)
         for poly in self.cutouts: sk -= Polygon(*poly, align=None)
         slab = Pos(0, 0, self.z) * extrude(sk, self.thickness)
         slab.label, slab.color = f"{self.name} FR4", color
         out = [slab]
         cache = {}
         for p in self.parts:
+            # a bottom-side part is turned over about its x axis (Rot X 180: y and z mirrored, the same flip as pad_xy) under the board
+            bottom = p.layer == "bottom"
+            side = Pos(p.x, p.y, self.z if bottom else self.z + self.thickness) * Rot(0, 0, p.rot) * (Rot(180, 0, 0) if bottom else Rot(0, 0, 0))
             if models and p.fp.model and os.path.exists(p.fp.model):
                 if p.fp.model not in cache: cache[p.fp.model] = import_step(p.fp.model)
-                m = Pos(p.x, p.y, self.z + self.thickness) * Rot(0, 0, p.rot) * cache[p.fp.model]
+                m = side * cache[p.fp.model]
                 m.label = f"{p.ref} {p.fp.name}"; out.append(m)
             for q in p.fp.pads:
                 if not q.layers: continue
                 x, y = p.pad_xy(q)
-                pad = Pos(x, y, self.z + self.thickness) * (Cylinder(q.w / 2, 0.05, align=(Align.CENTER, Align.CENTER, Align.MIN)) if q.shape == "circle"
-                                                           else Rot(0, 0, p.rot) * Box(q.w, q.h, 0.05, align=(Align.CENTER, Align.CENTER, Align.MIN)))
+                zp = self.z - 0.05 if bottom else self.z + self.thickness
+                pad = Pos(x, y, zp) * (Cylinder(q.w / 2, 0.05, align=(Align.CENTER, Align.CENTER, Align.MIN)) if q.shape == "circle"
+                                      else Rot(0, 0, p.rot) * Box(q.w, q.h, 0.05, align=(Align.CENTER, Align.CENTER, Align.MIN)))
                 pad.label, pad.color = f"{p.ref} pad {q.number}", Color(0.85, 0.65, 0.2); out.append(pad)
         if routed and os.path.exists(routed):
             with open(routed) as f: els = json.load(f)

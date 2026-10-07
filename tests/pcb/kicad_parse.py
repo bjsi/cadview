@@ -324,6 +324,15 @@ def _unescape(s: str) -> str:
     return re.sub(r"\\u([0-9A-Fa-f]{4})", lambda m: chr(int(m.group(1), 16)), s)
 
 
+def _ends(p, q) -> tuple:
+    """the two endpoints in a direction-free order: by x, then by y, coordinates within 1 um counting as equal - so a
+    line that is vertical within 1 um in one file and exactly vertical in the other orders the same way in both"""
+    for i in (0, 1):
+        if abs(p[i] - q[i]) > 1e-3:
+            return (p, q) if p[i] < q[i] else (q, p)
+    return (p, q)
+
+
 def read_outline(path) -> list:
     """Edge.Cuts Gerber -> list of ('line', x1, y1, x2, y2) / ('arc', x1, y1, x2, y2, cx, cy) with endpoints sorted so
     direction does not matter; arc centres absolute."""
@@ -333,10 +342,10 @@ def read_outline(path) -> list:
     out = []
     for o in g.objects:
         if isinstance(o, go.Line):
-            a, b = sorted([(o.x1, o.y1), (o.x2, o.y2)])
+            a, b = _ends((o.x1, o.y1), (o.x2, o.y2))
             out.append(("line", a[0], a[1], b[0], b[1]))
         elif isinstance(o, go.Arc):
-            a, b = sorted([(o.x1, o.y1), (o.x2, o.y2)])
+            a, b = _ends((o.x1, o.y1), (o.x2, o.y2))
             out.append(("arc", a[0], a[1], b[0], b[1], o.x1 + o.cx, o.y1 + o.cy))
         elif isinstance(o, go.Region):
             out.append(("region", float(len(o.outline))))
@@ -378,19 +387,36 @@ def close(a, b, tol) -> bool:
     return True
 
 
+def _exact(r) -> tuple:
+    return tuple(round(float(v), 6) if not isinstance(v, str) else v for v in r)
+
+
 def match_multisets(a: list, b: list, tol: float, key=lambda r: ()):
-    """greedy one-to-one matching of two lists of signature tuples (grouped by `key`, e.g. (ref, pad)); returns
-    (matched, unmatched_a, unmatched_b).  A record matches another when every number agrees within `tol`."""
+    """one-to-one matching of two lists of signature tuples (grouped by `key`, e.g. (ref, pad)); returns
+    (matched, unmatched_a, unmatched_b).  A record matches another when every number agrees within `tol`.  Records equal
+    to 1e-6 are paired first, the rest greedily within `tol`: a polyline of segments shorter than `tol` (KiCad's plot of
+    a bezier) would otherwise let a greedy pass pair a segment with its neighbour and leave the chain's ends unmatched."""
     pool: dict = {}
     for r in b:
-        pool.setdefault(key(r), []).append(r)
-    matched, left = 0, []
+        pool.setdefault((key(r), _exact(r)), []).append(r)
+    matched, rest = 0, []
     for r in a:
-        cands = pool.get(key(r), [])
+        cands = pool.get((key(r), _exact(r)))
+        if cands:
+            cands.pop(); matched += 1
+        else:
+            rest.append(r)
+    loose: dict = {}
+    for cs in pool.values():
+        for c in cs:
+            loose.setdefault(key(c), []).append(c)
+    left = []
+    for r in rest:
+        cands = loose.get(key(r), [])
         hit = next((i for i, c in enumerate(cands) if close(r, c, tol)), None)
         if hit is None:
             left.append(r)
         else:
             cands.pop(hit); matched += 1
-    right = [c for cs in pool.values() for c in cs]
+    right = [c for cs in loose.values() for c in cs]
     return matched, left, right

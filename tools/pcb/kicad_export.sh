@@ -20,7 +20,8 @@ run "$K" pcb export gerbers -o "$OUT/gerbers/" "$PCB"
 run "$K" pcb export drill --excellon-separate-th --generate-map --map-format gerberx2 -o "$OUT/gerbers/" "$PCB"
 run "$K" pcb export pos --format csv --units mm --side both -o "$OUT/pos.csv" "$PCB"
 (cd "$OUT/gerbers" && rm -f ../gerbers.zip && zip -q ../gerbers.zip *.g* *.drl && echo "== gerbers.zip: $(ls | wc -l) files (KiCad Protel extensions, what JLCPCB's upload expects)")
-run "$K" pcb export svg --layers F.Cu,B.Cu,Edge.Cuts,F.SilkS -o "$OUT/board.svg" "$PCB"
+INNER=$(grep -oE '"In[0-9]+\.Cu"' "$PCB" | tr -d '"' | sort -u | paste -sd,)    # a 4-layer board's In1.Cu,In2.Cu (the gerbers above take every layer)
+run "$K" pcb export svg --layers "F.Cu,${INNER:+$INNER,}B.Cu,Edge.Cuts,F.SilkS" -o "$OUT/board.svg" "$PCB"
 SCH=${PCB%.kicad_pcb}.kicad_sch
 if [ -f "$SCH" ]; then
   echo "== $K sch erc"; "$K" sch erc --format json --severity-all --exit-code-violations -o "$OUT/erc.json" "$SCH" 2>&1 | grep -v "^$" | tail -3

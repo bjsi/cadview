@@ -96,9 +96,11 @@ def reexpress(m, rec: kp.BoardRec, name: str, footprint_dir: str | None = None, 
     """An open-source board parsed by kicad_parse -> the same board through the DSL: outline from Edge.Cuts, the same
     library footprints (by Lib:Name) at the same origins and rotations, the same net on every pad; no copper
     routing, no zones.  `footprint_dir` overrides the library the footprints are read from.  Footprints on B.Cu are
-    placed with `Placed.layer = "bottom"` - the DSL does not write bottom-side footprints yet, the tests pin that gap."""
+    placed with `layer="bottom"`.  A circular inner wire of the Face came from a `gr_circle` on Edge.Cuts, so it goes
+    back as one (`inner_circles="cutout"`), not as the DSL's default NPTH drill."""
     face = face or face_from_edge_cuts(rec.edge)
-    b = m.Board(face, thickness=1.6, name=name, z=0.0)
+    b = m.Board(face, thickness=1.6, name=name, z=0.0, inner_circles="cutout",
+                layers=len(rec.copper_layers))     # the original's copper layer count
     saved = m.KICAD_FP
     if footprint_dir:
         m.KICAD_FP = footprint_dir
@@ -108,9 +110,8 @@ def reexpress(m, rec: kp.BoardRec, name: str, footprint_dir: str | None = None, 
             lib, _, fname = fp.name.partition(":")
             if fp.name not in cache:
                 cache[fp.name] = m.kicad_footprint(lib, fname)
-            p = b.place(cache[fp.name], fp.ref, (fp.x, -fp.y), rot=fp.rot, value=fp.value, center_pads=False)
-            if fp.layer == "B.Cu":
-                p.layer = "bottom"
+            b.place(cache[fp.name], fp.ref, (fp.x, -fp.y), rot=fp.rot, value=fp.value, center_pads=False,
+                    layer="bottom" if fp.layer == "B.Cu" else "top")
     finally:
         m.KICAD_FP = saved
     nets: dict = {}

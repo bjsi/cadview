@@ -34,6 +34,7 @@ def _module_candidates():
         yield pathlib.Path(env)
     yield HERE.parent / "cadpcb.py"
     yield HERE.parent / "cadview" / "pcb.py"
+    yield HERE.parent.parent / "cadview" / "pcb.py"      # the cadview repo layout: tests/pcb/ under the repo root
     try:
         spec = importlib.util.find_spec("cadview")
     except (ImportError, ValueError):
