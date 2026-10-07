@@ -12,6 +12,7 @@ dependencies = [
 
 [project.optional-dependencies]
 pcb = ["shapely>=2"]            # cadview.pcb: board outlines from build123d faces
+dev = ["pytest", "gerbonara"]   # tests/pcb: the KiCad conformance suite (needs kicad-cli + KiCad libraries)
 
 [project.scripts]
 cadview = "cadview.server:main"

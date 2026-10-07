@@ -117,8 +117,14 @@ def kicad_footprint(lib: str, name: str) -> Footprint:
     for n in tree:
         if not (isinstance(n, list) and n and n[0] == "pad"): continue
         number, kind, shape = str(n[1]).rstrip("0").rstrip(".") if isinstance(n[1], float) else n[1], n[2], n[3]
-        at = _kv(n, "at"); x, y = at[1], -at[2]; rot = at[3] if len(at) > 3 else 0.0
+        at = _kv(n, "at"); rot = at[3] if len(at) > 3 else 0.0
         size = _kv(n, "size"); w, h = size[1], size[2]
+        # the copper's centre can sit off the pad position: `(drill (offset dx dy))` and custom-pad primitives
+        # both shift it in the PAD's own frame, which turns with the pad's angle (as KiCad draws it)
+        sx = sy = 0.0
+        d = _kv(n, "drill")
+        off = _kv(d, "offset") if d else None
+        if off: sx, sy = off[1], off[2]
         prim = _kv(n, "primitives")                                                 # custom pads (castellations, solder jumpers): cover the primitives too
         if prim:
             xs, ys = [-w / 2, w / 2], [-h / 2, h / 2]
@@ -131,14 +137,17 @@ def kicad_footprint(lib: str, name: str) -> Footprint:
                     xs += [c[1] - r, c[1] + r]; ys += [c[2] - r, c[2] + r]
                 elif g[0] in ("gr_rect", "gr_line"):
                     s, e = _kv(g, "start"), _kv(g, "end"); xs += [s[1], e[1]]; ys += [s[2], e[2]]
-            w, h = max(xs) - min(xs), max(ys) - min(ys); x += (max(xs) + min(xs)) / 2; y -= (max(ys) + min(ys)) / 2
+            w, h = max(xs) - min(xs), max(ys) - min(ys); sx += (max(xs) + min(xs)) / 2; sy += (max(ys) + min(ys)) / 2
+        a = math.radians(rot)                                                       # KiCad frame (y down), then flipped to y up
+        x = at[1] + sx * math.cos(a) + sy * math.sin(a)
+        y = -(at[2] - sx * math.sin(a) + sy * math.cos(a))
         if rot % 180 == 90: w, h = h, w
         drill = 0.0
-        d = _kv(n, "drill")
         if d: drill = max([v for v in d[1:] if isinstance(v, float)] or [0.0])     # (drill 0.95), (drill oval 1.0 1.8), (drill (offset ..))
         lay = _kv(n, "layers") or []
-        layers = tuple(sorted({"top" if l.startswith("F.") else "bottom" for l in lay[1:] if l.endswith(".Cu") or l.startswith("*")} or {"top"}))
+        layers = tuple(sorted({"top" if l.startswith("F.") else "bottom" for l in lay[1:] if l.endswith(".Cu") or l.startswith("*")}))
         if kind != "smd": layers = ("top", "bottom")
+        # no copper layer at all (paste-only pads): keep it for the library tree, but it is not a copper pad
         pads.append(Pad(number, kind, shape, x, y, w, h, drill, layers))
     m = _kv(tree, "model")
     model = _MODEL_VAR.sub(KICAD_3D, m[1]) if m else None
@@ -348,6 +357,7 @@ class Board:
                             position=dict(x=p.x, y=p.y, z=self.thickness / 2), rotation=dict(x=0, y=0, z=p.rot), layer=p.layer,
                             **({"model_step_url": "file://" + p.fp.model} if p.fp.model else {})))
             for qi, q in enumerate(p.fp.pads):
+                if not q.layers: continue                                       # paste-only pad: no copper, no port
                 x, y = p.pad_xy(q)
                 if q.number:
                     sp, pp = f"source_port_{pi}_{qi}", f"pcb_port_{pi}_{qi}"
@@ -643,6 +653,7 @@ class Board:
                 m = Pos(p.x, p.y, self.z + self.thickness) * Rot(0, 0, p.rot) * cache[p.fp.model]
                 m.label = f"{p.ref} {p.fp.name}"; out.append(m)
             for q in p.fp.pads:
+                if not q.layers: continue
                 x, y = p.pad_xy(q)
                 pad = Pos(x, y, self.z + self.thickness) * (Cylinder(q.w / 2, 0.05, align=(Align.CENTER, Align.CENTER, Align.MIN)) if q.shape == "circle"
                                                            else Rot(0, 0, p.rot) * Box(q.w, q.h, 0.05, align=(Align.CENTER, Align.CENTER, Align.MIN)))
