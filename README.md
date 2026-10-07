@@ -42,25 +42,30 @@ part, two selections show the distance between them, double-click finds a
 part in the tree, ⏺ records the playing clip to video.
 
 Try it without installing: **[bjsi.github.io/cadview](https://bjsi.github.io/cadview/)** —
-or locally, `python examples/demo.py` → `http://127.0.0.1:3941/demo`
-(`python examples/parts.py` adds a few more to browse in the gallery at `/`)
+or locally: `python examples/mega_desk.py` (a 2 m workbench with shelving,
+~50 parts in groups) and `python examples/gantry.py` (an XY gantry with a
+stacked Z and gripper, animated) → `http://127.0.0.1:3941/` lists them;
+`examples/demo.py` is the minimal one, `examples/parts.py` fills the gallery.
 
 ## Animate
 
-![sliding drawer clip](docs/demo.gif)
+![gantry pick-and-place clip](docs/demo.gif)
 
 ```python
-SLIDE = [("drawer (slides)", "tx", [0, 0.6, 2.0, 3.4, 4.6, 5.2], [0, 0, 85, 85, 0, 0])]
-PEEK  = [("drawer (slides)", "tx", [0, 0.4, 1.1, 1.8, 2.3], [0, 0, 28, 0, 0])]
-show(build(), animation=[{"name": "open & close", "tracks": SLIDE},
-                         {"name": "peek", "tracks": PEEK}])
+PICK = [("Y stage",    "ty", [0, 0.5, 2.0, 5.5, 7.0], [0, 0, -125, -125, -35]),
+        ("X carriage", "tx", [0, 0.5, 2.0, 5.5, 7.0], [0, 0,  120,  120, 300]),
+        ("Z1 stage",   "tz", [0, 2.0, 3.0, 4.5, 5.5], [0, 0, -150, -150,   0]),
+        ("finger left", "tx", [0, 3.8, 4.2], [0, 0, 12])]
+show(build(), animation=[{"name": "pick & place", "tracks": PICK}])
 ```
 
 A track is `(selector, action, times, values)`: selectors match part
 labels, actions are `tx/ty/tz` (mm), `rx/ry/rz` (degrees about the node's
 own origin), `vis` (show/hide) and `q`; tracks on the same node add
-together. Clips get a dropdown; ⚠ toggles the animated collision check.
-`examples/demo.py` is the scene in the gif. Agents (or you) can fetch every
+together, and a node carries its children — the gripper rides Z2, Z2 rides
+Z1, Z1 rides the X carriage. Clips get a dropdown; ⚠ toggles the animated
+collision check. `examples/gantry.py` is the scene in the gif
+(`examples/demo.py` is a one-track drawer). Agents (or you) can fetch every
 part's world bbox from `GET /api/parts` and verify tracks headlessly with
 `POST /api/clearance`; `cadview.Timeline` builds tracks phase-by-phase if
 the arrays get unwieldy — see `docs/DETAILS.md`.
