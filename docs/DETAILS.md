@@ -1,6 +1,6 @@
 # cadview — details
 
-![sliding drawer demo](hero.png)
+![mega desk in the viewer](ui.png)
 
 ## Using it from a script
 
