@@ -10,6 +10,9 @@ dependencies = [
     "ocp-tessellate>=3.4",
 ]
 
+[project.optional-dependencies]
+pcb = ["shapely>=2"]            # cadview.pcb: board outlines from build123d faces
+
 [project.scripts]
 cadview = "cadview.server:main"
 

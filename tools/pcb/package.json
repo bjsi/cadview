@@ -1,0 +1,21 @@
+{
+  "name": "cadview-pcb-export",
+  "private": true,
+  "type": "module",
+  "description": "npm packages tools/pcb/export.mjs needs (tscircuit Circuit JSON toolchain), versions as verified 2026-10-07",
+  "dependencies": {
+    "@tscircuit/capacity-autorouter": "0.0.962",
+    "@tscircuit/math-utils": "0.0.38",
+    "circuit-json": "0.0.520",
+    "circuit-json-to-bom-csv": "0.0.19",
+    "circuit-json-to-gerber": "0.0.112",
+    "circuit-json-to-gltf": "0.0.148",
+    "circuit-json-to-kicad": "0.0.230",
+    "circuit-json-to-pnp-csv": "0.0.20",
+    "circuit-json-to-step": "0.0.43",
+    "circuit-to-svg": "0.0.445"
+  },
+  "scripts": {
+    "preinstall": "test -d vendor/pcb-trace-linter || (mkdir -p vendor && curl -sL https://codeload.github.com/tscircuit/pcb-trace-linter/tar.gz/4c035f9d40ffb03ba547a08975b5e64b20371123 | tar xz -C vendor && mv vendor/pcb-trace-linter-* vendor/pcb-trace-linter)"
+  }
+}

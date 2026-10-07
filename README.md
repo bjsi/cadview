@@ -103,6 +103,16 @@ hidden frame of whatever cadview page is open — any view, any part framed,
 any animation time — and the page the person is looking at never changes.
 `GET /api/parts?name=<project>` gives positions without a picture.
 
+## Boards
+
+`cadview.pcb` lays a 2-layer PCB out from the CAD: `Board(face)` takes the
+outline, holes and cutouts off a build123d Face, `kicad_footprint()` reads
+KiCad's own libraries, `place()` / `net()` / `keepout()` describe the
+board, and out come a `.kicad_pcb` an agent can edit and `kicad-cli` can
+check and export (`tools/pcb/kicad_export.sh`), tscircuit Circuit JSON for
+its router (`tools/pcb/export.mjs`), JLCPCB BOM + CPL, and `solid()` — the
+populated board back in the assembly. `pip install cadview[pcb]`.
+
 ## Review pages
 
 `python -m cadview.bake --single-file out/` writes one self-contained
