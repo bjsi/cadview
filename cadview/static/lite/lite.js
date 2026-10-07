@@ -15,6 +15,7 @@ const emptyMsg = document.getElementById("empty");
 // the server (an agent asked) — no tray, no thumbnail, post the PNG, done
 const SNAP = new URLSearchParams(location.search).get("snap")
     ? Object.fromEntries(new URLSearchParams(location.search)) : null;
+if (SNAP) document.documentElement.classList.add("snap");   // chrome off; elements stay (boot reads them)
 
 // ---- renderer / scene / camera ---------------------------------------------
 let renderer;
@@ -338,6 +339,15 @@ async function snapshot() {
         for (const id of focus) partsIndex.get(id)?.meshes.forEach((m) => { if (m.visible) box.expandByObject(m, true); });
         if (!box.isEmpty()) fitBox(box); else fitView();
         lookFrom(p.view || "iso", parseFloat(p.zoom));
+        if (p.yaw) {
+            // turntable: spin the camera about its up axis around the target
+            // (a publisher renders yaw=0,15,30… into a GIF)
+            camera.position.sub(controls.target)
+                .applyAxisAngle(camera.up, (parseFloat(p.yaw) || 0) * DEG)
+                .add(controls.target);
+            controls.update();
+            render();
+        }
         await new Promise((r) => setTimeout(r, 50));
         render();
         const c = renderer.domElement;

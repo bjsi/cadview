@@ -185,6 +185,8 @@ live updates, without one this is still a full viewer; (3) install is a URL.
         #empty[hidden] { display: none; }
         #gizmo { position: fixed; left: 8px; bottom: 8px; z-index: 10;
             width: 110px; height: 110px; cursor: pointer; }
+        /* snapshot frames (?snap=…): just the model */
+        .snap #hud, .snap #gizmo, .snap #animbar, .snap #tray, .snap #selpanel, .snap #empty { display: none !important; }
     </style>
 </head>
 <body>
