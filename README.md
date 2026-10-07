@@ -49,7 +49,7 @@ stacked Z and gripper, animated) → `http://127.0.0.1:3941/` lists them;
 
 ## Animate
 
-![gantry pick-and-place clip](docs/demo.gif)
+![a lab gantry picking a ring and placing it on a peg](docs/demo.gif)
 
 ```python
 PICK = [("Y stage",    "ty", [0, 0.5, 2.0, 5.5, 7.0], [0, 0, -125, -125, -35]),
@@ -64,8 +64,10 @@ labels, actions are `tx/ty/tz` (mm), `rx/ry/rz` (degrees about the node's
 own origin), `vis` (show/hide) and `q`; tracks on the same node add
 together, and a node carries its children — the gripper rides Z2, Z2 rides
 Z1, Z1 rides the X carriage. Clips get a dropdown; ⚠ toggles the animated
-collision check. `examples/gantry.py` is the scene in the gif
-(`examples/demo.py` is a one-track drawer). Agents (or you) can fetch every
+collision check. The gif is a real lab gantry (266 parts, its source lives
+in its own repo) driven by exactly such tracks on its carriages, Z stages,
+gripper fingers and the ring; `examples/gantry.py` is a simplified machine
+you can run, `examples/demo.py` a one-track drawer. Agents (or you) can fetch every
 part's world bbox from `GET /api/parts` and verify tracks headlessly with
 `POST /api/clearance`; `cadview.Timeline` builds tracks phase-by-phase if
 the arrays get unwieldy — see `docs/DETAILS.md`.

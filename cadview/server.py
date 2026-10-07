@@ -998,7 +998,7 @@ async def handle_thumb_post(request):
 # path the gallery uses for thumbnails. The page the person is looking at is
 # never changed. No page open anywhere -> 503 with the fix.
 SNAP_TIMEOUT = int(os.environ.get("CADVIEW_SNAPSHOT_TIMEOUT", "40"))
-SNAP_PARAMS = ("view", "w", "h", "hide", "only", "focus", "zoom", "yaw", "t", "clip")
+SNAP_PARAMS = ("view", "w", "h", "hide", "only", "focus", "zoom", "yaw", "t", "clip", "clearance")
 
 
 async def handle_snapshot_get(request):

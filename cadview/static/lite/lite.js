@@ -334,6 +334,7 @@ async function snapshot() {
             applyAnimTime(parseFloat(p.t) || 0);
             modelGroup.updateMatrixWorld(true);
         }
+        if (p.clearance === "0") setClearanceOn(false);   // no collision tint in the shot
         const focus = partIds(p.focus);
         const box = new THREE.Box3();
         for (const id of focus) partsIndex.get(id)?.meshes.forEach((m) => { if (m.visible) box.expandByObject(m, true); });
