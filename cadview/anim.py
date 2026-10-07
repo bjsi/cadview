@@ -54,12 +54,16 @@ class Timeline:
         self._add(selector, "vis", start, start, 0.0)
         return self._add(selector, "vis", until, until, 1.0)
 
-    def chapter(self, name, start):
+    def chapter(self, name, start, camera=None):
         """Name the phase that begins at `start` — a tick on the viewer's scrub
         bar, the name next to the time while it plays, click to jump,
-        snapshot(chapter=name)."""
+        snapshot(chapter=name). `camera` = {"focus": part, "view": "iso",
+        "zoom": 1.2, "yaw": 15}: the viewer poses it when the chapter starts."""
         self._chapters = getattr(self, "_chapters", [])
-        self._chapters.append({"t": float(start), "name": str(name)})
+        entry = {"t": float(start), "name": str(name)}
+        if camera:
+            entry["camera"] = dict(camera)
+        self._chapters.append(entry)
         return self
 
     def chapters(self):

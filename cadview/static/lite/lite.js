@@ -301,6 +301,23 @@ function lookFrom(name, zoom) {
     controls.update();
     render();
 }
+function poseCamera(cam) {
+    // {focus: parts, view: iso|top|…, zoom: n, yaw: deg} — chapters and snapshots
+    const focus = partIds(cam.focus);
+    const box = new THREE.Box3();
+    for (const id of focus) partsIndex.get(id)?.meshes.forEach((m) => { if (m.visible) box.expandByObject(m, true); });
+    if (!box.isEmpty()) fitBox(box); else fitView();
+    lookFrom(cam.view || "iso", parseFloat(cam.zoom));
+    if (cam.yaw) {
+        // turntable: spin the camera about its up axis around the target
+        // (a publisher renders yaw=0,15,30… into a GIF)
+        camera.position.sub(controls.target)
+            .applyAxisAngle(camera.up, (parseFloat(cam.yaw) || 0) * DEG)
+            .add(controls.target);
+        controls.update();
+    }
+    render();
+}
 function partIds(spec) {
     // comma list of ids / labels / path suffixes (resolveTargets semantics)
     // -> every leaf under each match
@@ -328,33 +345,24 @@ async function snapshot() {
         const only = partIds(p.only), hide = partIds(p.hide);
         if (only.size) setVisible([...partsIndex.keys()].filter((k) => !only.has(k)), false);
         if (hide.size) setVisible([...hide], false);
+        let chapterCam = null;
         if (animClips.length && (p.clip != null || p.t != null || p.chapter != null)) {
             const byName = animClips.findIndex((c) => c.name === p.clip);
             loadClip(p.clip == null ? 0 : byName >= 0 ? byName : Math.max(0, +p.clip || 0));
             let t = parseFloat(p.t) || 0;
-            if (p.chapter != null) {   // chapter=<name>: the shot at that chapter's time
+            if (p.chapter != null) {   // chapter=<name>: the shot at that chapter's time, with its camera
                 const want = String(p.chapter).toLowerCase();
                 const ch = (anim?.chapters || []).find((c) => c.name.toLowerCase() === want);
-                if (ch) t = ch.t;
+                if (ch) { t = ch.t; chapterCam = ch.camera || null; }
             }
             applyAnimTime(t);
             modelGroup.updateMatrixWorld(true);
         }
         if (p.clearance === "0") setClearanceOn(false);   // no collision tint in the shot
-        const focus = partIds(p.focus);
-        const box = new THREE.Box3();
-        for (const id of focus) partsIndex.get(id)?.meshes.forEach((m) => { if (m.visible) box.expandByObject(m, true); });
-        if (!box.isEmpty()) fitBox(box); else fitView();
-        lookFrom(p.view || "iso", parseFloat(p.zoom));
-        if (p.yaw) {
-            // turntable: spin the camera about its up axis around the target
-            // (a publisher renders yaw=0,15,30… into a GIF)
-            camera.position.sub(controls.target)
-                .applyAxisAngle(camera.up, (parseFloat(p.yaw) || 0) * DEG)
-                .add(controls.target);
-            controls.update();
-            render();
-        }
+        // explicit view/focus/zoom/yaw win over the chapter's own camera
+        const cam = { ...(chapterCam || {}) };
+        for (const k of ["view", "focus", "zoom", "yaw"]) if (p[k] != null && p[k] !== "") cam[k] = p[k];
+        poseCamera(cam);
         await new Promise((r) => setTimeout(r, 50));
         render();
         const c = renderer.domElement;
@@ -676,6 +684,12 @@ function applyAnimTime(t) {
     timeLabel.textContent = t.toFixed(1) + "s" + (current !== null ? " · " + anim.chapters[current].name : "");
     timeLabel.title = current !== null ? anim.chapters[current].name : "";
     ticks.querySelectorAll(".tick").forEach((el, i) => el.classList.toggle("on", i === current));
+    // a chapter can bring its own camera (focus / view / zoom / yaw): applied
+    // when the chapter is entered — play, scrub or tick — never while inside it
+    if (current !== anim.chapterIdx) {
+        anim.chapterIdx = current;
+        if (current !== null && anim.chapters[current].camera) poseCamera(anim.chapters[current].camera);
+    }
     render();
 }
 

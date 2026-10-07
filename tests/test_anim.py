@@ -40,6 +40,8 @@ class TimelineTests(unittest.TestCase):
         self.assertEqual(clip["name"], "assembly")
         self.assertEqual(clip["speed"], 1.5)
         self.assertEqual(clip["chapters"], [{"t": 0.0, "name": "open the lid"}, {"t": 1.0, "name": "slide the tray"}])
+        close = Timeline().move("a", "tx", 1, start=0, dur=1).chapter("close-up", 0, camera={"focus": "a", "zoom": 1.5}).clip("c")
+        self.assertEqual(close["chapters"][0]["camera"], {"focus": "a", "zoom": 1.5})
         self.assertEqual(len(clip["tracks"]), 2)
         self.assertNotIn("chapters", Timeline().move("a", "tx", 1, start=0, dur=1).clip("plain"))
 

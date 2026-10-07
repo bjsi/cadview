@@ -65,9 +65,10 @@ own origin), `vis` (show/hide) and `q`; tracks on the same node add
 together, and a node carries its children — the gripper rides Z2, Z2 rides
 Z1, Z1 rides the X carriage. Clips get a dropdown; a clip's `chapters`
 (`[{"t": 4.0, "name": "feeder"}, …]`) become ticks on the scrub bar — the
-current one is named next to the time, a click jumps there, and
-`cadview_snapshot(chapter="feeder")` shoots it; ⚠ toggles the animated
-collision check. The gif is a real lab gantry (266 parts, its source lives
+current one is named next to the time, a click jumps there, a chapter's
+optional `"camera": {"focus": part, "view": …, "zoom": …}` is posed when it
+starts, and `cadview_snapshot(chapter="feeder")` shoots it; ⚠ toggles the
+animated collision check. The gif is a real lab gantry (266 parts, its source lives
 in its own repo) driven by exactly such tracks on its carriages, Z stages,
 gripper fingers and the ring; `examples/gantry.py` is a simplified machine
 you can run, `examples/demo.py` a one-track drawer. Agents (or you) can fetch every

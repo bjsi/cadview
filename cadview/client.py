@@ -212,10 +212,17 @@ def show(*cad_objs, names=None, colors=None, alphas=None, **kwargs):
             # chapters: [{"t": seconds, "name": "..."}] or [(t, name)] — ticks on
             # the scrub bar, the current one named next to the time, click to jump;
             # snapshot(chapter=name) is an alias for its t
+            # a chapter may carry a camera {"focus": part, "view": iso|top|…,
+            # "zoom": 1.2, "yaw": deg} the viewer poses when the chapter starts
             out = []
             for ch in raw or []:
-                t, name = (ch["t"], ch["name"]) if isinstance(ch, dict) else ch
-                out.append({"t": float(t), "name": str(name)[:80]})
+                t, name = (ch["t"], ch["name"]) if isinstance(ch, dict) else ch[:2]
+                entry = {"t": float(t), "name": str(name)[:80]}
+                cam = ch.get("camera") if isinstance(ch, dict) else (ch[2] if len(ch) > 2 else None)
+                if isinstance(cam, dict):
+                    entry["camera"] = {k: (float(v) if k in ("zoom", "yaw") else str(v))
+                                       for k, v in cam.items() if k in ("focus", "view", "zoom", "yaw") and v is not None}
+                out.append(entry)
             return sorted(out, key=lambda c: c["t"])
 
         speed = float(kwargs.get("animation_speed", 1.0))
