@@ -109,13 +109,15 @@ any animation time — and the page the person is looking at never changes.
 
 ## Boards
 
-`cadview.pcb` lays a 2-layer PCB out from the CAD: `Board(face)` takes the
-outline, holes and cutouts off a build123d Face, `kicad_footprint()` reads
-KiCad's own libraries, `place()` / `net()` / `keepout()` describe the
-board, and out come a `.kicad_pcb` an agent can edit and `kicad-cli` can
-check and export (`tools/pcb/kicad_export.sh`), tscircuit Circuit JSON for
-its router (`tools/pcb/export.mjs`), JLCPCB BOM + CPL, and `solid()` — the
-populated board back in the assembly. `pip install cadview[pcb]`.
+`cadview.pcb` lays a PCB out from the CAD: `Board(face, layers=2|4)` takes
+the outline, holes and cutouts (arcs, beziers, circles) off a build123d
+Face, `kicad_footprint()` reads KiCad's own libraries, `place()` (either
+side) / `net()` / `keepout()` / `pour()` describe the board, and out come
+a `.kicad_pcb` + schematic an agent can edit and `kicad-cli` can check and
+export (`tools/pcb/kicad_export.sh`), tscircuit Circuit JSON for its router
+(`tools/pcb/export.mjs`), JLCPCB BOM + CPL, and `solid()` — the populated
+board back in the assembly. Proven against nine open-source KiCad boards
+(`tests/pcb`). `pip install cadview[pcb]`.
 
 ## Review pages
 

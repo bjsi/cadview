@@ -19,7 +19,8 @@ self-contained, and the suite can be dropped into the cadview repo as `tests/` n
 | `test_oss_boards.py` | 3. nine open-source boards re-expressed through the DSL, Gerber-vs-Gerber; the gap table |
 | `test_jlc.py` | 4. JLCPCB `bom.csv` / `cpl.csv` / `bom_full.csv` |
 | `test_bottom_side.py` | 5. bottom-side parts: KiCad's flip storage, Gerbers against a top twin turned over, pos / CPL, Circuit JSON, `solid()` |
-| `test_layers_curves.py` | 6. a 4-layer board (`Board(layers=4)`): layer table + stackup through kicad-cli, inner-layer Gerbers; bezier / spline outlines as `gr_curve` |
+| `test_layers_curves.py` | 6. a 4-layer board (`Board(layers=4)`): layer table + stackup through kicad-cli (ids against a KiCad-9-written board), inner-layer Gerbers; bezier / spline / ellipse outlines as `gr_curve` within tolerance |
+| `test_cutouts.py` | 7. circular inner wires as NPTH (default) or `gr_circle` cutouts; slot cutouts as a closed Edge.Cuts chain; `Board.hole()` |
 | `fixtures/oss/` | the nine boards (big ones gzipped) + `SOURCES.md` (repo, commit, licence, sha256) |
 
 ## Running
@@ -119,7 +120,7 @@ Closed gaps (were strict xfails; the row says what the DSL does now):
 | bottom-side footprints | soil-moisture, pan-tilt motor + main, pico-ice, antmicro, corne | `place(..., layer="bottom")`: `kicad_pcb()` writes the library tree the way KiCad's top/bottom flip stores it (`_flip_tree`: pad y mirrored, pad and text angles negated, `F.*` <-> `B.*` layers, chamfers top <-> bottom, text mirrored) at `(layer "B.Cu") (at x -y rot)`; `Placed.pad_xy()` / `pad_layers()` mirror the same way for Circuit JSON, the CPL and `solid()`.  All six fixtures store their bottom parts this way (0 of 178 library-matched bottom footprints use the left/right mirror).  Section 5 below is the focused test |
 | circular Edge.Cuts cutouts (`gr_circle` inside the outline) | corne | `Board(..., inner_circles="cutout")` keeps a circular inner wire on Edge.Cuts (`gr_circle`); the default `"npth"` still makes it a non-plated drill (a CAD mounting hole), and `Board.hole(at, d)` adds one explicitly.  Corne's 12 circles: Edge.Cuts match, NPTH 286 / 286 |
 | inner copper layers (4-layer) | pico-ice, antmicro | `Board(layers=4)` (2 / 4 / 6) writes the KiCad 9/10 layer table (copper on the even ids: F.Cu 0, In1.Cu 4, In2.Cu 6, B.Cu 2) and a `(setup (stackup ...))` with the copper / dielectric layers summing to the board thickness; `reexpress()` passes the original's copper count, so `test_layer_stack` passes for pico-ice and antmicro; section 6 below round-trips a 4-layer board through kicad-cli |
-| bezier (`gr_curve`) Edge.Cuts | corne | a BEZIER edge is written as `gr_curve` with its four control points (6 decimals, KiCad's own precision), a BSPLINE as one `gr_curve` per cubic span (OCC's span-to-bezier conversion; rational or higher-degree curves, i.e. ellipses, are sampled into short lines, no longer a wrong 3-point arc); the points keep the direction the curve was drawn in (the writer walks `wire.edges()`, not `order_edges()`, which rebuilds a reversed edge's curve backwards), because KiCad's polyline of a bezier depends on it.  Corne's 100 beziers match segment for segment, so with the 12 circles its `test_outline_matches` passes |
+| bezier (`gr_curve`) Edge.Cuts | corne | a BEZIER edge is written as `gr_curve` with its four control points (6 decimals, KiCad's own precision), a BSPLINE as one `gr_curve` per cubic span (OCC's span-to-bezier conversion; rational or higher-degree curves and ellipses are first approximated by a cubic BSpline within `CURVE_TOL` = 1 um and split the same way, no longer a wrong 3-point arc or 0.25 mm lines); the points keep the direction the curve was drawn in (the writer walks `wire.edges()`, not `order_edges()`, which rebuilds a reversed edge's curve backwards), because KiCad's polyline of a bezier depends on it.  Corne's 100 beziers match segment for segment, so with the 12 circles its `test_outline_matches` passes |
 
 Two oracle fixes came with it (`kicad_parse`): `match_multisets` pairs records equal to 1e-6 before the greedy pass within `tol`
 (a bezier plots as segments shorter than 0.01 mm, which the greedy pass alone paired with their neighbours and left 32 chain ends
@@ -173,8 +174,12 @@ is an oracle that owes nothing to the DSL's own mirror rules.
 - `test_gerber_flashes_are_the_top_twin_turned_over` - the bottom part's copper flashes == the twin's mirrored about the part's y, on
   the other copper layer, same size (335 flashes over 20 parts); a bottom part's SMD pads flash on B.Cu only; plain pads at
   `pad_xy()` with the DSL's size.
-- `test_pos_file_and_cpl_agree` - `kicad-cli pcb export pos`: side bottom, the same rotation and X/Y as the DSL's CPL (`Layer` =
-  Bottom); `Mid X/Y` is the twin's pad centre turned over.
+- `test_pos_file_and_cpl_agree` - `kicad-cli pcb export pos`: side bottom, the same X/Y as the DSL's CPL (`Layer` = Bottom), and
+  the CPL rotation in JLC's convention: a bottom part's angle as seen from the bottom, `(180 - rot) % 360` of KiCad's stored /
+  pos-file angle, which is what both KiCad -> JLC exporters write (Fabrication Toolkit, the tool JLC's KiCad guide recommends,
+  and kicad-jlcpcb-tools); checked geometrically too - seen from the bottom (x mirrored) the pads lie where the unflipped
+  library footprint turned by the CPL angle puts them.  `Mid X/Y` is the twin's pad centre turned over.  (Found by the
+  2026-10-07 adversarial review: the CPL had KiCad's angle verbatim for bottom parts.)
 - `test_circuit_json_and_solid_put_the_part_under_the_board` - `pcb_smtpad` / `pcb_port` / `pcb_component` on `bottom`; `solid()`
   puts the STEP model (same height) and the pads under the board, the pad at `pad_xy()`.
 
@@ -201,6 +206,22 @@ between two through vias.
   `gr_curve` points come out in the drawn order every time.
 - `test_spline_outline_is_cubic_spans` — a BSPLINE through 4 points -> 3 `gr_curve` items chained end to end, each span's ends
   and quarter points on the spline within 1e-6, and no `gr_arc`.
+- `test_curve_outline_within_tolerance` — a 6-span cubic spline, a degree-5 spline, a rational quadratic and a 10 x 1 half
+  ellipse each on one side of a board: every one comes out as `gr_curve` spans (exact for the cubic; within 0.002 mm of the CAD
+  edge for the rest, measured by OCC's point-on-curve projection at 41 points per span) and the outline has no open end.
+  The 2026-10-07 review found the sampled-lines fallback 0.029 mm off on the ellipse; the DSL now approximates such curves
+  with cubic beziers within `CURVE_TOL` = 1 um (`GeomConvert_ApproxCurve`).
+- `test_layer_table_ids_match_a_kicad9_board` — the DSL's `(layers ...)` ids equal, name for name, the ones KiCad 9 wrote in the
+  antmicro 4-layer fixture (copper on the even ids 0 / 4 / 6 / 2; KiCad 8's 0 / 1 / 2 / 31 would be wrong for format 20241229),
+  and its 4-layer dielectrics are prepreg / core / prepreg like that board's.
+
+**7. Inner wires: NPTH drills vs Edge.Cuts cutouts** (`test_cutouts.py`): a Face with a circular and a slot-shaped inner wire.
+
+- `test_circle_inner_wire` — default `inner_circles="npth"`: the circle is one `cadview:NPTH` footprint at the CAD position
+  and no `gr_circle` (what every board written before the option existed got - the ordered nose-poke board's M2.5 clearance
+  holes are such wires); `"cutout"`: a `gr_circle` and no drill.  The slot is 2 `gr_arc` + 2 `gr_line` either way, a closed
+  chain `face_from_edge_cuts` rebuilds as one inner wire of the right area.
+- `test_explicit_hole` / `test_bad_inner_circles_value` — `Board.hole()` adds an NPTH; a bad `inner_circles` raises.
 
 ## What the suite does NOT prove
 
@@ -213,17 +234,19 @@ between two through vias.
   `num_layers` / inner-layer trace names.
 - **Silkscreen, mask, paste, courtyard, fab layers** are not compared (only F.Cu / B.Cu / Edge.Cuts / drills) - so the mirrored
   text and `B.SilkS` / `B.Fab` / `B.CrtYd` of a bottom-side part are written as KiCad does but only re-read, not rendered.
-- **Bottom-side parts in JLC's terms**: the CPL rotation / X / Y equal KiCad's own position file for bottom parts; whether JLC
-  wants the bottom side mirrored or offset for a given part is, as for the top, outside what can be tested.
-- **Inner-layer pads and rational curves**: a 4-layer board is proven to the layer table / stackup / inner Gerbers (section 6);
-  nothing checks an inner-layer *pad* (there are none).  Beziers are proven on corne's 100 and the section-6 board; a rational
-  curve (ellipse) is sampled into lines and not compared against anything.
+- **Bottom-side parts in JLC's terms**: the CPL rotation follows the convention the two KiCad -> JLC exporters implement
+  (180 - KiCad's angle, section 5), not a JLC document - JLC's own KiCad guide only says to use one of those tools; whether JLC
+  wants a further offset for a given part is, as for the top, outside what can be tested.
+- **Inner-layer pads**: a 4-layer board is proven to the layer table / stackup / inner Gerbers (section 6); nothing checks an
+  inner-layer *pad* (there are none).  Beziers are proven on corne's 100 and the section-6 board; the approximation of
+  ellipses / rational / high-degree curves is proven against the CAD edge (section 6) but not through kicad-cli.
 - **Rotations other than multiples of 90** are proven for the KiCad path only (soil-moisture 45 / 135, corne 113.88 ...): the
   library tree is re-embedded and KiCad draws it.  The DSL's own `Pad.w / h` (Circuit JSON, `solid()`) still only swap at 90 / 270.
 - **Library drift is tolerated, not resolved**, in the `library` variant: the test proves the DSL reproduces whichever
   footprint it is given; which library version a fab receives is the user's responsibility.
-- **JLC conventions beyond KiCad's**: the CPL rotation is proven equal to KiCad's own position file; whether JLC's part
-  library wants +90 / 180 for a given part (the README's "check in their order preview") is outside what can be tested.
+- **JLC conventions beyond KiCad's**: the CPL rotation is proven equal to KiCad's own position file (top) / 180 minus it
+  (bottom); whether JLC's part library wants +90 / 180 for a given part (the README's "check in their order preview") is
+  outside what can be tested.
 - **KiCad version**: run here against kicad-cli 10.0.6 (board re-saved in format 20260206) with the KiCad 10.0 libraries;
   KiCad 9 should behave the same but was not run.
 - **The 3D models**: the full STEP export is only checked to be larger than the board-only one (the models landed), not that

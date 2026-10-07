@@ -153,13 +153,22 @@ def test_gerber_flashes_are_the_top_twin_turned_over(pair, board):
 def test_flash_count(board):
     n = sum(1 for f in board["flashes"]["top"] + board["flashes"]["bottom"] if f.ref.startswith("B"))
     conftest.REPORT.append(f"bottom-side parts: {n} pad flashes of {len(board['pairs'])} bottom parts (4 footprints x 5 rotations) "
-                           f"== their top twins turned over, KiCad re-read == FOOTPRINT::Flip storage, pos == CPL")
+                           f"== their top twins turned over, KiCad re-read == FOOTPRINT::Flip storage, CPL rotation == 180 - pos (JLC's bottom convention)")
     assert n > 100
 
 
 # ---------------------------------------------------------------------------------------------- (c) ----
 def test_pos_file_and_cpl_agree(board):
-    """`kicad-cli pcb export pos`: side bottom, and the rotation / X / Y the DSL writes in the JLC CPL for every bottom part"""
+    """`kicad-cli pcb export pos`: side bottom, X / Y as the DSL's JLC CPL, and the CPL rotation in JLC's convention.
+
+    KiCad's position file writes a bottom part's stored orientation (PLACE_FILE_EXPORTER: `GetOrientation()`, the angle as
+    seen from the top).  JLC reads a bottom part's rotation as seen from the bottom - the board turned over left-right - which
+    is 180 - that angle: both KiCad -> JLC exporters write `(180 - rot) % 360` for B.Cu parts (Fabrication Toolkit
+    plugins/process.py, "JLC expect 'Rotation' to be 'as viewed from above component', so bottom needs inverting, and ends up
+    180 degrees out as well" - the tool JLC's own KiCad guide recommends, "Apply automatic component translations" ticked;
+    kicad-jlcpcb-tools fabrication.py `if footprint.GetLayer() != 0: rotation = (180 - rotation) % 360`).  Checked here
+    against the geometry too: seen from the bottom (x mirrored), the part's pads lie where the unflipped library footprint
+    turned by the CPL angle puts them."""
     b, pos, d = board["board"], board["pos"], board["dir"]
     files = b.write_jlc(str(d))
     cpl = {r["Designator"]: r for r in csv.DictReader(open(files["cpl.csv"]))}
@@ -167,7 +176,14 @@ def test_pos_file_and_cpl_agree(board):
     for bot, top, lib in board["pairs"]:
         assert pos[bot.ref]["Side"] == "bottom" and pos[top.ref]["Side"] == "top", bot.ref
         assert cpl[bot.ref]["Layer"] == "Bottom" and cpl[top.ref]["Layer"] == "Top"
-        assert float(pos[bot.ref]["Rot"]) % 360 == pytest.approx(float(cpl[bot.ref]["Rotation"]) % 360, abs=1e-6), bot.ref
+        assert float(pos[top.ref]["Rot"]) % 360 == pytest.approx(float(cpl[top.ref]["Rotation"]) % 360, abs=1e-6), top.ref
+        cpl_rot = float(cpl[bot.ref]["Rotation"]) % 360
+        assert cpl_rot == pytest.approx((180.0 - float(pos[bot.ref]["Rot"])) % 360, abs=1e-6), f"{bot.ref}: KiCad pos {pos[bot.ref]['Rot']}, CPL {cpl_rot}"
+        a = math.radians(cpl_rot); c, s = math.cos(a), math.sin(a)
+        for q in bot.fp.pads:
+            x, y = bot.pad_xy(q)
+            seen_from_below = (-(x - bot.x), y - bot.y)                                    # the board turned over left-right
+            assert seen_from_below == pytest.approx((q.x * c - q.y * s, q.x * s + q.y * c), abs=1e-4), f"{bot.ref} pad {q.number!r}"
         assert (float(pos[bot.ref]["PosX"]), float(pos[bot.ref]["PosY"])) == pytest.approx((bot.x, bot.y), abs=1e-3), bot.ref
         # Mid X/Y (the pad-bbox centre, seen from the top) is the twin's turned over: same x offset from the origin, y mirrored
         tx, ty = mid(top.ref)

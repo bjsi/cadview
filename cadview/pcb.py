@@ -16,8 +16,9 @@ footprints' STEP models on it, so it sits in the assembly without a round trip.
 
 Units mm, Z up; Circuit JSON is y-up too, KiCad footprints are y-down and are flipped on read.  Implemented: smd and
 through-hole pads (rect / roundrect / oval / circle), rotations in multiples of 90 deg, circle holes, polygon cutouts,
-outline edges as KiCad's own items (lines, arcs, circles, cubic beziers - `gr_curve`; other splines approximated by cubic
-beziers span by span, ellipses sampled), rect keepouts, copper pours, hand traces + vias, silkscreen text, 2 / 4 / 6 copper
+outline edges as KiCad's own items (lines, arcs, circles, cubic beziers - `gr_curve`; cubic splines split into their spans
+exactly, every other curve - ellipses, rational / higher-degree splines - approximated by cubic beziers within CURVE_TOL =
+1 um), rect keepouts, copper pours, hand traces + vias, silkscreen text, 2 / 4 / 6 copper
 layers (`Board(layers=4)`: In1.Cu .. in the layer table and stackup, pours and traces on `layer="In1.Cu"`, through vias), parts
 on either side; `kicad_sch()` writes a schematic (global labels per net) and `check_netlist()` proves it against the board.
 Needs build123d; shapely for outlines (`pip install cadview[pcb]`); KiCad's footprint + 3D libraries on disk
@@ -31,9 +32,10 @@ drill file, as a CAD mounting hole should be made; `inner_circles="cutout"` keep
 
 Sides.  `place(..., layer="bottom")` puts a part on the back the way KiCad flips one (top/bottom flip, FOOTPRINT::Flip):
 `(layer "B.Cu")`, pad y mirrored in the footprint frame, pad and text angles negated, every F.* layer its B.* twin, the
-footprint at `(at x -y rot)` - so `rot` is the angle KiCad shows and `kicad-cli pcb export pos` / the JLC CPL report for the
-part.  `Placed.pad_xy()` mirrors the same way, so Circuit JSON, the CPL and `solid()` (the STEP model turned under the board)
-agree with the Gerbers.
+footprint at `(at x -y rot)` - so `rot` is the angle KiCad shows and `kicad-cli pcb export pos` reports for the part; the JLC
+CPL gets 180 - rot, the angle as seen from the bottom, which is what JLC reads for a bottom part (`write_jlc`).
+`Placed.pad_xy()` mirrors the same way, so Circuit JSON, the CPL and `solid()` (the STEP model turned under the board) agree
+with the Gerbers.
 """
 from __future__ import annotations
 
@@ -264,17 +266,27 @@ def _circle_of(wire: Wire):
     return None
 
 
+CURVE_TOL = 0.001   # mm: how far a cubic-bezier approximation of an outline curve KiCad cannot hold exactly may stray from the CAD edge
+
+
 def _cubic_beziers(e: Edge):
-    """A BEZIER / BSPLINE edge as cubic beziers: a list of 4-pole [(x, y) ...] runs in the curve's own direction (the way it was
-    drawn - KiCad's polyline of a bezier depends on it, so a round trip keeps it), each one a KiCad `gr_curve`.  The edge's
-    parameter range goes through OCC's curve -> BSpline -> per-span bezier conversion (exact for a non-rational curve of degree
-    <= 3: a cubic bezier comes back as itself, a quadratic / line is degree-elevated); None when the curve is rational or above
-    cubic (ellipses, high-degree splines), which the caller samples into lines instead."""
+    """A curve edge as cubic beziers: a list of 4-pole [(x, y) ...] runs in the curve's own direction (the way it was drawn -
+    KiCad's polyline of a bezier depends on it, so a round trip keeps it), each one a KiCad `gr_curve`.  The edge's parameter
+    range goes through OCC's curve -> BSpline -> per-span bezier conversion, exact for a non-rational curve of degree <= 3 (a
+    cubic bezier comes back as itself, a quadratic / line is degree-elevated).  Anything else - an ellipse, a rational or
+    higher-degree spline - is first approximated by a non-rational cubic BSpline within CURVE_TOL (GeomConvert_ApproxCurve),
+    then split the same way; None only when that approximation fails, which the caller samples into lines instead."""
     from OCP.Geom import Geom_TrimmedCurve
-    from OCP.GeomConvert import GeomConvert, GeomConvert_BSplineCurveToBezierCurve
+    from OCP.GeomAbs import GeomAbs_C1
+    from OCP.GeomConvert import GeomConvert, GeomConvert_ApproxCurve, GeomConvert_BSplineCurveToBezierCurve
     ad = e.geom_adaptor()
-    bs = GeomConvert.CurveToBSplineCurve_s(Geom_TrimmedCurve(ad.Curve().Curve(), ad.FirstParameter(), ad.LastParameter()))
-    if bs.IsRational() or bs.Degree() > 3: return None
+    crv = Geom_TrimmedCurve(ad.Curve().Curve(), ad.FirstParameter(), ad.LastParameter())
+    bs = GeomConvert.CurveToBSplineCurve_s(crv)
+    if bs.IsRational() or bs.Degree() > 3:
+        ap = GeomConvert_ApproxCurve(crv, CURVE_TOL, GeomAbs_C1, 500, 3)
+        if not (ap.IsDone() and ap.HasResult()): return None
+        bs = ap.Curve()
+        if bs.IsRational() or bs.Degree() > 3: return None
     cv = GeomConvert_BSplineCurveToBezierCurve(bs)
     out = []
     for k in range(1, cv.NbArcs() + 1):
@@ -423,8 +435,13 @@ class Board:
         groups = {}
         for r in rows: groups.setdefault((r["value"], r["fp"], r["lcsc"]), []).append(r["ref"])
         for (val, fp, lcsc), refs in groups.items(): bom.append(f'"{val}","{",".join(refs)}","{fp}","{lcsc}"')
+        # Rotation: JLC reads a bottom part's angle as seen from the bottom (the board turned over left-right), which is 180 - the
+        # angle KiCad stores / `kicad-cli pcb export pos` writes; the two KiCad->JLC tools (Fabrication Toolkit, the one JLC's own
+        # KiCad guide recommends, and kicad-jlcpcb-tools) both write (180 - rot) % 360 for B.Cu parts.  Top parts: as KiCad has them.
         cpl = ["Designator,Mid X,Mid Y,Layer,Rotation"]
-        for r in rows: cpl.append(f'"{r["ref"]}",{r["at"][0]:.3f}mm,{r["at"][1]:.3f}mm,{"Top" if r["layer"] == "top" else "Bottom"},{r["rot"]:g}')
+        for r in rows:
+            rot = r["rot"] if r["layer"] == "top" else (180.0 - r["rot"]) % 360
+            cpl.append(f'"{r["ref"]}",{r["at"][0]:.3f}mm,{r["at"][1]:.3f}mm,{"Top" if r["layer"] == "top" else "Bottom"},{rot:g}')
         full = ["ref,value,footprint,mpn,lcsc,note"] + [f'"{p.ref}","{p.value}","{p.fp.lib}:{p.fp.name}","{p.mpn}","{p.lcsc}","{p.note}"' for p in self.parts] + \
                [f'"{e["ref"]}","{e["value"]}","{e["fp"]}","{e["mpn"]}","{e["lcsc"]}","{e["note"]}"' for e in self.extra]
         out = {}
@@ -597,7 +614,8 @@ class Board:
                          ["property", Q("Value"), Q(f"hole {_num(d)} mm from the CAD"), ["at", 0.0, 0.0, 0.0], ["layer", Q("F.Fab")], ["hide", "yes"], U(), ["effects", ["font", ["size", 1.0, 1.0], ["thickness", 0.15]]]],
                          ["pad", Q(""), "np_thru_hole", "circle", ["at", 0.0, 0.0], ["size", d, d], ["drill", d], ["layers", Q("*.Cu"), Q("*.Mask")], U()]])
         # board edge + cutouts from the exact CAD edges, each as KiCad's own item: gr_line, gr_arc (3-point), gr_circle, gr_curve
-        # (a cubic bezier's 4 control points; a spline is split into cubic spans); what is none of those (an ellipse) is sampled into lines
+        # (a cubic bezier's 4 control points; a spline is split into cubic spans, any other curve approximated by them within
+        # CURVE_TOL); only a curve OCC cannot approximate is sampled into lines
         XY = lambda p, nd=4: [round(p.X, nd), Y(round(p.Y, nd))] if hasattr(p, "X") else [round(p[0], nd), Y(round(p[1], nd))]
         edge = lambda kind, *geo: root.append([kind, *geo, stroke(), ["layer", Q("Edge.Cuts")], U()])
         for w in self.edge_wires:
@@ -611,7 +629,7 @@ class Board:
                 elif e.geom_type == GeomType.CIRCLE:
                     edge("gr_arc", ["start", *XY(p0)], ["mid", *XY(e @ 0.5)], ["end", *XY(p1)])
                 else:
-                    runs = _cubic_beziers(e) if e.geom_type in (GeomType.BEZIER, GeomType.BSPLINE) else None
+                    runs = _cubic_beziers(e)                                   # BEZIER / BSPLINE exact, ELLIPSE etc. within CURVE_TOL
                     if runs:
                         for P in runs: edge("gr_curve", ["pts"] + [["xy", *XY(q, 6)] for q in P])      # 6 decimals: KiCad's own precision, so its polyline of the curve is the same
                     else:
