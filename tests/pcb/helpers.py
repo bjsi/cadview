@@ -32,7 +32,14 @@ def face_from_edge_cuts(items: list) -> Face:
             pts = [(x0, y0), (x1, y0), (x1, y1), (x0, y1)]
             for p, q in zip(pts, pts[1:] + pts[:1]):
                 edges.append(Edge.make_line(F(p), F(q)))
-    wires = Wire.combine(edges)
+        elif it.kind == "poly":
+            pts = list(it.pts)
+            for p, q in zip(pts, pts[1:] + pts[:1]):
+                if p != q:
+                    edges.append(Edge.make_line(F(p), F(q)))
+        elif it.kind == "curve":
+            edges.append(Edge.make_bezier(*[F(p) for p in it.pts]))
+    wires = Wire.combine(edges, tol=0.01)       # KiCad chains Edge.Cuts within 0.01 mm too (real boards have 4 um steps)
     closed = [w for w in wires if w.is_closed]
     assert closed, "no closed loop on Edge.Cuts"
     area = lambda w: Face(w).area
@@ -77,11 +84,20 @@ def build_roundtrip_board(m):
 
 
 # --------------------------------------------------------------------------------------- re-expression ----
-def reexpress(m, rec: kp.BoardRec, name: str, footprint_dir: str | None = None):
+def fallback_face(items: list) -> Face:
+    """the bounding rectangle of the Edge.Cuts items (y-up): stands in when the outline cannot be built, so the rest of
+    a board can still be compared"""
+    xs = [p[0] for it in items for p in it.pts]
+    ys = [-p[1] for it in items for p in it.pts]
+    return face_rect(max(xs) - min(xs), max(ys) - min(ys), (min(xs) + max(xs)) / 2, (min(ys) + max(ys)) / 2)
+
+
+def reexpress(m, rec: kp.BoardRec, name: str, footprint_dir: str | None = None, face: Face | None = None):
     """An open-source board parsed by kicad_parse -> the same board through the DSL: outline from Edge.Cuts, the same
     library footprints (by Lib:Name) at the same origins and rotations, the same net on every pad; no copper
-    routing, no zones.  `footprint_dir` overrides the library the footprints are read from."""
-    face = face_from_edge_cuts(rec.edge)
+    routing, no zones.  `footprint_dir` overrides the library the footprints are read from.  Footprints on B.Cu are
+    placed with `Placed.layer = "bottom"` - the DSL does not write bottom-side footprints yet, the tests pin that gap."""
+    face = face or face_from_edge_cuts(rec.edge)
     b = m.Board(face, thickness=1.6, name=name, z=0.0)
     saved = m.KICAD_FP
     if footprint_dir:
@@ -89,11 +105,12 @@ def reexpress(m, rec: kp.BoardRec, name: str, footprint_dir: str | None = None):
     try:
         cache = {}
         for fp in rec.footprints:
-            assert fp.layer == "F.Cu", f"{fp.ref}: the DSL writes top-side footprints only ({fp.layer})"
             lib, _, fname = fp.name.partition(":")
             if fp.name not in cache:
                 cache[fp.name] = m.kicad_footprint(lib, fname)
-            b.place(cache[fp.name], fp.ref, (fp.x, -fp.y), rot=fp.rot, value=fp.value, center_pads=False)
+            p = b.place(cache[fp.name], fp.ref, (fp.x, -fp.y), rot=fp.rot, value=fp.value, center_pads=False)
+            if fp.layer == "B.Cu":
+                p.layer = "bottom"
     finally:
         m.KICAD_FP = saved
     nets: dict = {}

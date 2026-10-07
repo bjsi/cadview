@@ -436,6 +436,7 @@ class Board:
                 if not isinstance(n, list): out.append(n); continue
                 if n[0] == "layer": continue
                 if n[0] == "property" and n[1] in ("Reference", "Value"): n[2] = Q(p.ref if n[1] == "Reference" else p.value)
+                if n[0] == "fp_text" and n[1] in ("reference", "value"): n[2] = Q(p.ref if n[1] == "reference" else p.value)   # KiCad <= 7 library format
                 if n[0] in ("property", "fp_text"):                                   # text angles are absolute in the file: add the part's
                     at = _kv(n, "at")
                     if at: at[3:] = [((at[3] if len(at) > 3 else 0.0) + a) % 360]

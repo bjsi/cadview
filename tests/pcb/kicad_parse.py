@@ -141,6 +141,10 @@ def read_footprint(node) -> FootprintRec:
     at = child(node, "at", ["at", 0.0, 0.0])
     layer = child(node, "layer")
     props = {p[1]: p[2] for p in children(node, "property") if len(p) > 2 and isinstance(p[2], str)}
+    # KiCad 6 / 7 files carry the reference and value as `(fp_text reference "R1" ...)` instead of properties
+    for t in children(node, "fp_text"):
+        if len(t) > 2 and t[1] in ("reference", "value"):
+            props.setdefault(str(t[1]).capitalize(), str(t[2]))
     model = child(node, "model")
     return FootprintRec(str(node[1]), [read_pad(p) for p in children(node, "pad")], at[1], at[2],
                         at[3] if len(at) > 3 else 0.0, layer[1] if layer else "F.Cu",
@@ -155,9 +159,9 @@ def read_kicad_mod(path) -> FootprintRec:
 # ------------------------------------------------------------------------------------------------ boards ----
 @dataclass
 class EdgeItem:
-    kind: str                       # line | arc | circle | rect
-    pts: tuple                      # line: (start, end); arc: (start, mid, end); circle: (center, end); rect: (start, end)
-    width: float = 0.0
+    kind: str                       # line | arc | circle | rect | poly | curve
+    pts: tuple                      # line: (start, end); arc: (start, mid, end); circle: (center, end); rect: (start, end);
+    width: float = 0.0              # poly: (p0, p1, ...); curve (cubic bezier): (start, ctrl1, ctrl2, end)
 
 
 @dataclass
@@ -169,6 +173,8 @@ class BoardRec:
     vias: list = field(default_factory=list)   # (x, y, drill) of every via (KiCad frame)
     zones: int = 0
     version: float = 0.0
+    copper_layers: list = field(default_factory=list)   # copper layer names from the `(layers ...)` table, in stack order
+    fp_edge_items: int = 0          # fp_line / fp_arc / ... drawn on Edge.Cuts inside footprints (castellations, module cutouts)
 
     def pad_nets(self) -> dict:
         """{(ref, pad_number): sorted list of net names} over every pad on the board (duplicate pad numbers keep one entry each)"""
@@ -201,15 +207,28 @@ def read_board(path) -> BoardRec:
         if n[0] == "gr_line":
             edge.append(EdgeItem("line", (P("start"), P("end")), w))
         elif n[0] == "gr_arc":
+            assert child(n, "mid"), f"{path}: KiCad 5 arc (start/end/angle) on Edge.Cuts - KiCad 6+ boards only"
             edge.append(EdgeItem("arc", (P("start"), P("mid"), P("end")), w))
         elif n[0] == "gr_circle":
             edge.append(EdgeItem("circle", (P("center"), P("end")), w))
         elif n[0] == "gr_rect":
             edge.append(EdgeItem("rect", (P("start"), P("end")), w))
+        elif n[0] == "gr_poly":
+            edge.append(EdgeItem("poly", tuple(tuple(pt[1:3]) for pt in child(n, "pts")[1:]), w))
+        elif n[0] == "gr_curve":
+            edge.append(EdgeItem("curve", tuple(tuple(pt[1:3]) for pt in child(n, "pts")[1:]), w))
+    fp_edge = 0
+    for f in children(tree, "footprint"):
+        for g in f:
+            if isinstance(g, list) and g and isinstance(g[0], str) and g[0].startswith("fp_"):
+                lay = child(g, "layer")
+                fp_edge += bool(lay) and lay[1] == "Edge.Cuts"
+    layers = child(tree, "layers") or []
+    copper = [str(l[1]) for l in layers[1:] if isinstance(l, list) and str(l[1]).endswith(".Cu")]
     ver = child(tree, "version")
     return BoardRec([read_footprint(n) for n in children(tree, "footprint")], nets, edge,
                     len(children(tree, "segment")), vias, len(children(tree, "zone")),
-                    ver[1] if ver else 0.0)
+                    ver[1] if ver else 0.0, copper, fp_edge)
 
 
 def pad_abs(fp: FootprintRec, p: PadRec) -> tuple:

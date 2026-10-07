@@ -16,9 +16,9 @@ self-contained, and the suite can be dropped into the cadview repo as `tests/` n
 | `helpers.py` | DSL-side helpers: build123d Face from Edge.Cuts, the round-trip board, re-expression of a parsed board through the DSL, KiCad pad semantics (offset / rotation / custom primitives) |
 | `test_footprints.py` | 1. footprint fidelity (15 footprints across 9 libraries) |
 | `test_roundtrip.py` | 2. DSL board -> kicad-cli DRC / Gerbers / drill / STEP / IPC-D-356 |
-| `test_oss_boards.py` | 3. two open-source boards re-expressed through the DSL, Gerber-vs-Gerber |
+| `test_oss_boards.py` | 3. nine open-source boards re-expressed through the DSL, Gerber-vs-Gerber; the gap table |
 | `test_jlc.py` | 4. JLCPCB `bom.csv` / `cpl.csv` / `bom_full.csv` |
-| `fixtures/oss/` | the two boards + `SOURCES.md` (repo, commit, licence, sha256) |
+| `fixtures/oss/` | the nine boards (big ones gzipped) + `SOURCES.md` (repo, commit, licence, sha256) |
 
 ## Running
 
@@ -39,7 +39,7 @@ library on disk (`KICAD_FOOTPRINTS`, default `/usr/share/kicad/footprints`), and
 | `PCB_TEST_OUT` | where to leave the outputs (default: pytest's tmp dir, printed in the summary) |
 
 Without a runnable `kicad-cli` the tests that need it are **skipped** (shown in the `-ra` summary), not passed.  Every
-kicad-cli call runs under `nice -n 10`, one at a time (17 calls, ~20 s on the hub).
+kicad-cli call runs under `nice -n 10`, one at a time (~80 calls, ~2 min on the hub).
 
 ## What each test proves
 
@@ -77,25 +77,59 @@ NPTH, an 8 x 3 mm cutout, SOIC-8 + 0603 + JST XH 1x02, nets GND / SIG, one hand 
 - `test_edge_cuts_and_drills` — the Edge.Cuts Gerber has 8 lines + 4 arcs with the Face's extent, each arc centred r inside
   its corner, the 4 cutout edges; NPTH drill = the two CAD holes at their CAD positions (y-up frame); PTH = J1's two pins.
 
-**3. Open-source boards** (`test_oss_boards.py`), `fixtures/oss/SOURCES.md`: *pi-pico-mpu6050-light* (14 footprints: Pico,
-HVQFN-24, 0805s, JST PH, barrel jack, 8 vias) and *stepper-playground-12v-pico* (17 footprints: Pico, pin headers, TO-220,
-DO-41, radial caps, terminal block, 4 mounting holes), both MIT, KiCad 9 format.  Each is parsed by `kicad_parse`, re-expressed
-through the DSL (Face from Edge.Cuts, `kicad_footprint()` by `Lib:Name`, `place(..., center_pads=False)` at the original
-origin / rotation, the original net on every pad, no tracks / vias / zones), both exported with the same `kicad-cli` calls.
-Two variants: **library** (footprints from the installed KiCad library — what a user of the DSL gets) and **embedded** (the
-originals' own footprints, written out as a temporary `.pretty` library — isolates the DSL from library drift).
+**3. Open-source boards** (`test_oss_boards.py`), nine boards, `fixtures/oss/SOURCES.md` (repo, commit, licence, sha256 - checked by
+`test_fixture_matches_sources`; boards over 1 MB are stored gzip-compressed).  Each is parsed by `kicad_parse`, re-expressed through
+the DSL (Face from Edge.Cuts, `kicad_footprint()` by `Lib:Name`, `place(..., center_pads=False)` at the original origin / rotation, the
+original net on every pad, no tracks / vias / zones), both exported with the same `kicad-cli` calls.  Two variants: **library**
+(footprints from the installed KiCad library where the footprint exists there - what a user of the DSL gets - the board's own
+project-library footprints embedded; skipped when nothing on the board is in the installed library) and **embedded** (the originals'
+own footprints, written out as a temporary `.pretty` library - isolates the DSL from library drift).  What a board has is detected
+from the file (`_features`) and checked against what it was picked for (`BOARDS`); a feature the DSL cannot express is in `GAPS`,
+which turns the test it breaks into a **strict xfail** naming the feature (the gap list below).  Bottom-side parts are excluded from
+the pad / drill comparisons so the top side of such a board is still proven exactly, and pinned by their own test.
 
-- `test_outline_matches` — Edge.Cuts lines / arcs identical within 0.01 mm (4 / 4).
-- `test_drill_table_matches` — PTH and NPTH holes and slots identical within 0.01 mm, after removing the original's via
-  holes (routing is out of scope): 15 + 5 and 76 + 4 holes.
-- `test_pad_flashes_match[top|bottom]` — every pad flash (keyed by KiCad's `.P` ref/pad attribute: position, bounding
-  box, aperture type and parameters, and the `.N` net attribute) identical within 0.01 mm; tracks, arcs, zone regions and
-  via flashes excluded and counted in the report.  Embedded variant: exact (94 / 15 and 119 / 76 flashes).  Library
-  variant: every mismatch must be a pad whose embedded footprint differs from the installed library's (`_library_drift`),
-  and the list is reported — on the hub that is 6 pads of the stepper board (DO-41 and radial-cap pads changed shape between
-  the KiCad 9 and 10 libraries).
-- `test_netlists_match_pad_by_pad` — `kicad_parse` reads both `.kicad_pcb`: the same net on every `(ref, pad)` (96 and 115
-  keys, 0 differ) and the same set of net names.
+| board | KiCad | layers | footprints (B.Cu) | libs | picked for | result |
+|---|---|---|---|---|---|---|
+| pi-pico-mpu6050-light | 9 | 2 | 14 (0) | 7 | the original pair: Pico, QFN, JST, barrel jack | pass |
+| stepper-playground-12v-pico | 9 | 2 | 17 (0) | 9 | the original pair: THT, mounting holes, terminal block | pass (library: 6 drift pads) |
+| hsp-usb-led | 9 | 2 | 6 (0) | 4 | rounded-rectangle outline (4 arcs), USB-C slot drills | pass (library: USB-C shell pad renamed S1 -> SH, drift) |
+| capacitive-soil-moisture-sensor | 6 format | 2 | 23 (14) | 9 | 45 / 135 deg rotations, `fp_text reference`, arcs, bottom parts | pass; bottom-side xfail |
+| generic-pan-tilt-motor | 8 | 2 | 74 (11) | 14 | 14 custom pads, a pad-less logo, test points, fiducials | pass; bottom-side xfail |
+| generic-pan-tilt-main | 8 | 2 | 91 (78) | 17 | 8 `gr_rect` cutouts, slots, custom pads, 78 bottom parts | pass; bottom-side xfail |
+| pico-ice-rev3 | 8 | **4** | 101 (32) | 14 | castellated custom pads, slots, 4 layers | pass; layer-stack + bottom-side xfail |
+| antmicro-usb-c-power-adapter | 9 | **4** | 124 (46) | 1 | trapezoid pads, 34 zones, 4 um Edge.Cuts step, project-only library | embedded only: pass; layer-stack + bottom-side xfail |
+| crkbd-corne-cherry-hotswap | 7 format | 2 | 180 (168) | 12 | 100 bezier edges, 12 circle cutouts, 184 footprint-level Edge.Cuts, 113.88 deg keys, 44 slots | pads + netlist pass; outline, NPTH, bottom-side xfail |
+
+Gap table (feature -> boards -> what the DSL does; every row is a strict xfail, so the day the DSL learns it the suite says so):
+
+| feature | boards | DSL status |
+|---|---|---|
+| bottom-side footprints | soil-moisture, pan-tilt motor + main, pico-ice, antmicro, corne | `kicad_pcb()` writes every footprint on F.Cu and ignores `Placed.layer`.  KiCad stores a flipped footprint with pad y mirrored, pad angles negated and `F.*` <-> `B.*` layers (checked against pan-tilt-main's `R_0402` / `SOIC-28W` on B.Cu); that mirror + `(layer "B.Cu")` is the missing piece.  `test_bottom_side_parts` |
+| inner copper layers (4-layer) | pico-ice, antmicro | 2-layer only: F.Cu / B.Cu in the layer table, no `In1.Cu` / `In2.Cu`.  The F.Cu / B.Cu flashes, drills and outline of a 4-layer board DO match - only `test_layer_stack` fails |
+| bezier (`gr_curve`) Edge.Cuts | corne | `face_from_edge_cuts` builds the bezier, but `kicad_pcb()` writes every edge that is not a line or full circle as a 3-point `gr_arc`.  `test_outline_matches` |
+| circular Edge.Cuts cutouts (`gr_circle` inside the outline) | corne | a circular inner wire becomes an NPTH footprint (`Board.holes`), by design - so the Edge.Cuts Gerber lacks the circle and the NPTH drill gains a hole.  `test_outline_matches`, `test_drill_table_matches` |
+
+Proven by the new boards (no gap): rotations off the 90 deg grid (pad positions AND sizes - the library tree is re-embedded, KiCad
+draws it), oval / slot drills, custom-primitive and trapezoid pads, castellated edge pads, arc outlines, `gr_rect` cutouts, Edge.Cuts
+chained across a 4 um step (`Wire.combine(tol=0.01)`, as KiCad does), footprint-level Edge.Cuts items, pad-less footprints, 100+
+footprints from 12-17 libraries, KiCad 6 / 7 `fp_text reference` footprints (the one `cadview/pcb.py` change: `kicad_pcb()` now
+rewrites `fp_text reference / value` as well as the KiCad 8+ properties, otherwise an older library's footprint keeps "REF**").
+
+- `test_fixture_matches_sources` - sha256 of the (decompressed) fixture equals the SOURCES.md row.
+- `test_fixture_is_what_we_think` - footprints, Edge.Cuts, routing present; every feature in `BOARDS` detected.
+- `test_layer_stack` - the regenerated board's copper layer table equals the original's.
+- `test_outline_matches` - Edge.Cuts lines / arcs identical within 0.01 mm (4 to 40 items per board).
+- `test_drill_table_matches` - PTH and NPTH holes and slots identical within 0.01 mm, after removing the original's via holes and
+  (both sides) the holes of bottom-side parts.
+- `test_pad_flashes_match[top|bottom]` - every pad flash of a top-side part (keyed by KiCad's `.P` ref/pad attribute: position,
+  bounding box, aperture type and parameters, and the `.N` net attribute) identical within 0.01 mm; tracks, arcs, zone regions
+  and via flashes excluded and counted in the report (copper `fp_poly` inside a footprint is allowed - it is part of the tree).
+  Embedded variant: exact (8 to 346 flashes per layer).  Library variant: every mismatch must be a pad whose embedded footprint
+  differs from the installed library's (`_library_drift`, which also catches renamed pads), and the list is reported.
+- `test_bottom_side_parts` - the parts the original has on B.Cu are on B.Cu in the regenerated board with every flash in place
+  (strict xfail today, see the gap table; skipped on top-only boards).
+- `test_netlists_match_pad_by_pad` - `kicad_parse` reads both `.kicad_pcb`: the same net on every `(ref, pad)` (17 to 682 keys,
+  0 differ) and the same set of net names.
 
 **4. JLC outputs** (`test_jlc.py`): a fixture board with R1 / R2 (same part), C1 placed at -90, U1 at 180, J1 without an LCSC
 number, a `bom_only` part on another part's pads and a `bom_only(assemble=False)` lead.
@@ -117,12 +151,11 @@ number, a `bom_only` part on another part's pads and a `bom_only(assemble=False)
 - **Circuit JSON** (`circuit_json()` / `write()`), the **schematic** (`kicad_sch()`, ERC, `check_netlist()`), and **`solid()`**
   (the board back as build123d geometry) are not tested here beyond `write_kicad()` writing the schematic without error.
 - **Silkscreen, mask, paste, courtyard, fab layers** are not compared (only F.Cu / B.Cu / Edge.Cuts / drills).
-- **Bottom-side parts**: the DSL writes every footprint on F.Cu; the fixtures were chosen with top-side parts only, and
-  `reexpress()` asserts that.
-- **Non-rectangular open-source outlines**: both fixtures use a `gr_rect` outline; arcs on Edge.Cuts are proven only on the
-  DSL's own round-trip board (`helpers.face_from_edge_cuts` handles lines / arcs / circles / rects but is exercised on rects).
-- **Rotations other than multiples of 90** for the DSL's pad size (the Gerber test uses 0 / 90 / 180 / 270); positions use
-  full trigonometry and would hold, sizes are only checked at those angles.
+- **Bottom-side parts**: the DSL writes every footprint on F.Cu; six of the nine boards have parts on B.Cu, which are excluded
+  from the pad / drill comparisons and pinned as a strict xfail by `test_bottom_side_parts` (gap table above).
+- **Inner layers, beziers, circular cutouts**: the other three gap-table rows; the rest of each such board is still compared.
+- **Rotations other than multiples of 90** are proven for the KiCad path only (soil-moisture 45 / 135, corne 113.88 ...): the
+  library tree is re-embedded and KiCad draws it.  The DSL's own `Pad.w / h` (Circuit JSON, `solid()`) still only swap at 90 / 270.
 - **Library drift is tolerated, not resolved**, in the `library` variant: the test proves the DSL reproduces whichever
   footprint it is given; which library version a fab receives is the user's responsibility.
 - **JLC conventions beyond KiCad's**: the CPL rotation is proven equal to KiCad's own position file; whether JLC's part
