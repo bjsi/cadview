@@ -15,7 +15,8 @@ footprints' STEP models on it, so it sits in the assembly without a round trip.
     show(assembly + b.solid())
 
 Units mm, Z up; Circuit JSON is y-up too, KiCad footprints are y-down and are flipped on read.  Implemented: smd and
-through-hole pads (rect / roundrect / oval / circle), rotations in multiples of 90 deg, circle holes, polygon cutouts,
+through-hole pads (rect / roundrect / oval / circle), any rotation for the KiCad outputs (the library tree is re-embedded
+and KiCad draws it; the DSL's own `Pad.w / h` - Circuit JSON, `solid()` - only swap at 90 / 270), circle holes, polygon cutouts,
 outline edges as KiCad's own items (lines, arcs, circles, cubic beziers - `gr_curve`; cubic splines split into their spans
 exactly, every other curve - ellipses, rational / higher-degree splines - approximated by cubic beziers within CURVE_TOL =
 1 um), rect keepouts, copper pours, hand traces + vias, silkscreen text, 2 / 4 / 6 copper
@@ -61,6 +62,10 @@ class Q(str):
     """a quoted string token (vs a bare symbol), so a parsed tree serialises back the way KiCad wrote it"""
 
 
+_NUMBER = re.compile(r"[+-]?(?:\d+\.?\d*|\.\d+)")   # the only number KiCad writes: plain decimals, no exponent - so a hex
+                                                     # timestamp like KiCad 5/6's `(tedit 527E5841)` stays a symbol (float() would make it inf)
+
+
 def _sexp(text: str):
     """Minimal s-expression parser: nested lists of Q (quoted) / str (symbol) / float."""
     toks = re.findall(r'"(?:[^"\\]|\\.)*"|[()]|[^\s()]+', text)
@@ -72,9 +77,10 @@ def _sexp(text: str):
             done = cur; cur = stack.pop(); cur.append(done)
         elif t.startswith('"'):
             cur.append(Q(t[1:-1].replace('\\"', '"')))
+        elif _NUMBER.fullmatch(t):
+            cur.append(float(t))
         else:
-            try: cur.append(float(t))
-            except ValueError: cur.append(t)
+            cur.append(t)
     return cur[0]
 
 
@@ -554,8 +560,9 @@ class Board:
         return out
 
     def kicad_pcb(self, traces=None) -> str:
-        """A .kicad_pcb (format 20241229, loads in KiCad 9/10).  KiCad is y-DOWN: panel (x, y) -> (x, -y), angles negated, so
-        `kicad-cli pcb export step` lands back in the panel frame.  `traces`: Circuit JSON pcb_trace / pcb_via elements (e.g. from
+        """A .kicad_pcb (format 20241229, loads in KiCad 9/10).  KiCad is y-DOWN: panel (x, y) -> (x, -y); angles are written
+        as given (KiCad's CCW on its y-down screen is the y-up CCW angle after the flip, see below), so `kicad-cli pcb export
+        step` lands back in the panel frame.  `traces`: Circuit JSON pcb_trace / pcb_via elements (e.g. from
         export.mjs's routed.circuit.json) written as segments / vias; the nets are embedded, so the GUI shows the ratsnest."""
         import uuid as _uuid
         U = lambda: ["uuid", Q(str(_uuid.uuid4()))]
@@ -615,8 +622,9 @@ class Board:
                          ["pad", Q(""), "np_thru_hole", "circle", ["at", 0.0, 0.0], ["size", d, d], ["drill", d], ["layers", Q("*.Cu"), Q("*.Mask")], U()]])
         # board edge + cutouts from the exact CAD edges, each as KiCad's own item: gr_line, gr_arc (3-point), gr_circle, gr_curve
         # (a cubic bezier's 4 control points; a spline is split into cubic spans, any other curve approximated by them within
-        # CURVE_TOL); only a curve OCC cannot approximate is sampled into lines
-        XY = lambda p, nd=4: [round(p.X, nd), Y(round(p.Y, nd))] if hasattr(p, "X") else [round(p[0], nd), Y(round(p[1], nd))]
+        # CURVE_TOL); only a curve OCC cannot approximate is sampled into lines.  Every point at 6 decimals - KiCad's own nm
+        # precision: a flat arc (58 mm radius over a 3 mm chord, sagitta 0.02 mm) rounded to 4 decimals moves its centre 0.1 mm
+        XY = lambda p, nd=6: [round(p.X, nd), Y(round(p.Y, nd))] if hasattr(p, "X") else [round(p[0], nd), Y(round(p[1], nd))]
         edge = lambda kind, *geo: root.append([kind, *geo, stroke(), ["layer", Q("Edge.Cuts")], U()])
         for w in self.edge_wires:
             for e in w.edges():                                                 # not order_edges(): that rebuilds a wire-reversed edge's curve backwards
@@ -625,13 +633,13 @@ class Board:
                     edge("gr_line", ["start", *XY(p0)], ["end", *XY(p1)])
                 elif e.geom_type == GeomType.CIRCLE and e.is_closed:
                     c = e.arc_center
-                    root.append(["gr_circle", ["center", *XY(c)], ["end", round(c.X + e.radius, 4), Y(round(c.Y, 4))], stroke(), ["fill", "none"], ["layer", Q("Edge.Cuts")], U()])
+                    root.append(["gr_circle", ["center", *XY(c)], ["end", round(c.X + e.radius, 6), Y(round(c.Y, 6))], stroke(), ["fill", "none"], ["layer", Q("Edge.Cuts")], U()])
                 elif e.geom_type == GeomType.CIRCLE:
                     edge("gr_arc", ["start", *XY(p0)], ["mid", *XY(e @ 0.5)], ["end", *XY(p1)])
                 else:
                     runs = _cubic_beziers(e)                                   # BEZIER / BSPLINE exact, ELLIPSE etc. within CURVE_TOL
                     if runs:
-                        for P in runs: edge("gr_curve", ["pts"] + [["xy", *XY(q, 6)] for q in P])      # 6 decimals: KiCad's own precision, so its polyline of the curve is the same
+                        for P in runs: edge("gr_curve", ["pts"] + [["xy", *XY(q)] for q in P])
                     else:
                         n = max(2, int(e.length / 0.25))
                         pts = [e @ (i / n) for i in range(n + 1)]
@@ -808,7 +816,8 @@ class Board:
     # --- build123d
     def solid(self, color=None, models=True, routed=None) -> list:
         """The board as build123d parts in the panel frame: FR4 slab (outline, holes, cutouts) at self.z, plus each part's KiCad
-        STEP model on the top face.  `routed`: a circuit.json path with pcb_trace elements -> top-layer copper drawn as thin strips."""
+        STEP model on the top face (a bottom-side part turned over under the board) and its pads.  `routed`: a circuit.json path
+        with pcb_trace elements -> top-layer copper drawn as thin strips.  Not compared with KiCad's own STEP export by any test."""
         if color is None:
             color = Color(0.1, 0.4, 0.2)
         sk = Polygon(*self.outline, align=None)

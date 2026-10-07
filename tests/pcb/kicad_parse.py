@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 
 # ------------------------------------------------------------------------------------------ s-expressions ----
 _TOKEN = re.compile(r'"(?:[^"\\]|\\.)*"|\(|\)|[^\s()]+')
+_NUMBER = re.compile(r"[+-]?(?:\d+\.?\d*|\.\d+)")   # plain decimals only: KiCad 5/6's hex `(tedit 527E5841)` is a symbol, not 5.27e5843
 
 
 def parse(text: str):
@@ -30,11 +31,10 @@ def parse(text: str):
             stack.pop()
         elif t[0] == '"':
             stack[-1].append(t[1:-1].replace('\\"', '"').replace("\\\\", "\\"))
+        elif _NUMBER.fullmatch(t):
+            stack[-1].append(float(t))
         else:
-            try:
-                stack[-1].append(float(t))
-            except ValueError:
-                stack[-1].append(t)
+            stack[-1].append(t)
     if len(stack) != 1:
         raise ValueError("unbalanced parentheses")
     return root[0]
@@ -73,6 +73,8 @@ class PadRec:
     net: str = ""       # net name on a board pad ("" = none)
     prim_bbox: tuple | None = None   # custom pads: (xmin, ymin, xmax, ymax) of the primitives in the pad frame
     offset: tuple = (0.0, 0.0)       # `(drill (offset dx dy))`: the copper shape sits this far from the pad position (pad frame)
+    rratio: float | None = None      # `(roundrect_rratio r)` as written (roundrect / chamfered pads)
+    chamfer: tuple = ()              # `(chamfer top_left ...)`: the chamfered corners of a roundrect pad
 
     @property
     def copper(self) -> bool:
@@ -120,8 +122,10 @@ def read_pad(node) -> PadRec:
             bbox = (min(xs), min(ys), max(xs), max(ys))
     # `(net 3 "GND")` up to format 20241229; KiCad 10 (20260206) re-saves pads with `(net "GND")`: the name is the last string
     net_name = next((str(v) for v in reversed(net[1:]) if isinstance(v, str)), "") if net else ""
+    rr, ch = child(node, "roundrect_rratio"), child(node, "chamfer")
     return PadRec(numstr(node[1]), str(node[2]), str(node[3]), at[1], at[2], at[3] if len(at) > 3 else 0.0,
-                  size[1], size[2], drill, tuple(str(l) for l in lay[1:]) if lay else (), net_name, bbox, offset)
+                  size[1], size[2], drill, tuple(str(l) for l in lay[1:]) if lay else (), net_name, bbox, offset,
+                  rr[1] if rr else None, tuple(str(c) for c in ch[1:]) if ch else ())
 
 
 @dataclass
@@ -175,6 +179,8 @@ class BoardRec:
     version: float = 0.0
     copper_layers: list = field(default_factory=list)   # copper layer names from the `(layers ...)` table, in stack order
     fp_edge_items: int = 0          # fp_line / fp_arc / ... drawn on Edge.Cuts inside footprints (castellations, module cutouts)
+    castellated: bool = False       # `(castellated_pads yes)` in the setup / stackup: pads on the board edge are meant to be cut through
+    fp_copper_items: int = 0        # fp_line / fp_arc / fp_poly ... drawn on a copper layer inside footprints (they plot as lines / regions)
 
     def pad_nets(self) -> dict:
         """{(ref, pad_number): sorted list of net names} over every pad on the board (duplicate pad numbers keep one entry each)"""
@@ -217,18 +223,21 @@ def read_board(path) -> BoardRec:
             edge.append(EdgeItem("poly", tuple(tuple(pt[1:3]) for pt in child(n, "pts")[1:]), w))
         elif n[0] == "gr_curve":
             edge.append(EdgeItem("curve", tuple(tuple(pt[1:3]) for pt in child(n, "pts")[1:]), w))
-    fp_edge = 0
+    fp_edge = fp_cu = 0
     for f in children(tree, "footprint"):
         for g in f:
-            if isinstance(g, list) and g and isinstance(g[0], str) and g[0].startswith("fp_"):
+            if isinstance(g, list) and g and isinstance(g[0], str) and g[0].startswith("fp_") and g[0] != "fp_text":
                 lay = child(g, "layer")
                 fp_edge += bool(lay) and lay[1] == "Edge.Cuts"
+                fp_cu += bool(lay) and str(lay[1]).endswith(".Cu")
     layers = child(tree, "layers") or []
     copper = [str(l[1]) for l in layers[1:] if isinstance(l, list) and str(l[1]).endswith(".Cu")]
     ver = child(tree, "version")
+    setup = child(tree, "setup") or []
+    cast = child(setup, "castellated_pads") or child(child(setup, "stackup") or [], "castellated_pads")   # KiCad 9 puts it in the stackup
     return BoardRec([read_footprint(n) for n in children(tree, "footprint")], nets, edge,
                     len(children(tree, "segment")), vias, len(children(tree, "zone")),
-                    ver[1] if ver else 0.0, copper, fp_edge)
+                    ver[1] if ver else 0.0, copper, fp_edge, bool(cast) and cast[1] == "yes", fp_cu)
 
 
 def pad_abs(fp: FootprintRec, p: PadRec) -> tuple:

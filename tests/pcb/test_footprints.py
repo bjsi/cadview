@@ -90,6 +90,28 @@ def test_pad_lookup_by_number(cadpcb):
         fp.pad(9)
 
 
+def test_hex_timestamp_stays_a_symbol(cadpcb, tmp_path):
+    """KiCad 5 / 6 footprints carry `(tedit 527E5841)`, a hex edit stamp that Python's float() reads as 5.27e5843 = inf
+    (hackrf-one's GSG-QFN20-4; `50997E90` would silently become 5.1e94).  The DSL's parser takes only plain decimals as
+    numbers, so the token is kept as the symbol it is and serialised back verbatim."""
+    lib = tmp_path / "stamp.pretty"; lib.mkdir()
+    (lib / "X.kicad_mod").write_text('(footprint "X" (version 20211014) (layer "F.Cu") (tedit 527E5841)\n'
+                                     '  (fp_text reference "REF**" (at 0 0) (layer "F.SilkS") (tedit 50997E90))\n'
+                                     '  (pad "1" smd rect (at 0 0) (size 1 1.5) (layers "F.Cu" "F.Mask"))\n)\n')
+    saved = cadpcb.KICAD_FP
+    cadpcb.KICAD_FP = str(tmp_path)
+    try:
+        fp = cadpcb.kicad_footprint("stamp", "X")
+    finally:
+        cadpcb.KICAD_FP = saved
+    assert cadpcb._kv(fp.tree, "tedit") == ["tedit", "527E5841"]
+    assert fp.pad(1).w == 1.0 and fp.pad(1).h == 1.5
+    b = cadpcb.Board(H.face_rect(20, 10), name="stamp")
+    b.place(fp, "U1", (0, 0))
+    text = b.kicad_pcb()
+    assert "(tedit 527E5841)" in text and "(tedit 50997E90)" in text and "inf" not in text
+
+
 def test_slot_drill_is_the_long_dimension(cadpcb):
     """the DSL keeps one drill number per pad: for `(drill oval a b)` that is max(a, b) (documented, lossy)"""
     fp = cadpcb.kicad_footprint("Connector_USB", "USB_Micro-B_Molex-105017-0001")

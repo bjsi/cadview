@@ -1,4 +1,4 @@
-"""5. Inner copper layers and bezier outlines.
+"""6. Inner copper layers and bezier outlines.
 
 A 4-layer board (`Board(layers=4)`) whose outline has one cubic bezier edge, a GND pour on In1.Cu, a hand trace on In2.Cu
 between two through vias -> .kicad_pcb -> `kicad-cli pcb drc --save-board` -> `kicad_parse` sees the four copper layers
@@ -254,6 +254,31 @@ def test_curve_outline_within_tolerance(cadpcb, label, curve, tol):
     loose = [p for p, n in Counter((round(x, 5), round(y, 5)) for x, y in ends).items() if n != 2]
     assert not loose, f"{label}: outline ends that meet nothing: {loose}"
     conftest.REPORT.append(f"curve outline [{label}]: {kinds.count('gr_curve')} gr_curve spans, max {worst:.5f} mm off the CAD edge")
+
+
+def test_flat_arc_keeps_its_centre(cadpcb):
+    """a 58 mm radius arc over a 3.2 mm chord (sagitta 0.022 mm - the jumperless probe's tip) written as a 3-point gr_arc:
+    rounding its points to 4 decimals moved the centre KiCad reconstructs by 0.1 mm, so Edge.Cuts points are written at
+    6 decimals (KiCad's nm precision) and the centre is back within 0.01 mm.  The whole outline is checked the same way."""
+    from build123d import Edge, Face, Vector, Wire
+    r = 58.0
+    a, b = Vector(-1.6, 0, 0), Vector(1.6, 0, 0)
+    cy = -(r ** 2 - 1.6 ** 2) ** 0.5                                               # centre below the chord, arc bulging up
+    mid = Vector(0, cy + r, 0)
+    edges = [Edge.make_three_point_arc(a, mid, b), Edge.make_line(b, Vector(1.6, -10, 0)),
+             Edge.make_line(Vector(1.6, -10, 0), Vector(-1.6, -10, 0)), Edge.make_line(Vector(-1.6, -10, 0), a)]
+    face = Face(Wire.combine(edges, tol=0.01)[0])
+    tree = kp.parse(cadpcb.Board(face, name="flat").kicad_pcb())
+    arcs = [n for n in kp.children(tree, "gr_arc") if kp.child(n, "layer")[1] == "Edge.Cuts"]
+    assert len(arcs) == 1
+    (x1, y1), (x2, y2), (x3, y3) = (tuple(kp.child(arcs[0], k)[1:3]) for k in ("start", "mid", "end"))
+    d = 2 * (x1 * (y2 - y3) + x2 * (y3 - y1) + x3 * (y1 - y2))                      # circumcentre of the three stored points
+    ux = ((x1 ** 2 + y1 ** 2) * (y2 - y3) + (x2 ** 2 + y2 ** 2) * (y3 - y1) + (x3 ** 2 + y3 ** 2) * (y1 - y2)) / d
+    uy = ((x1 ** 2 + y1 ** 2) * (x3 - x2) + (x2 ** 2 + y2 ** 2) * (x1 - x3) + (x3 ** 2 + y3 ** 2) * (x2 - x1)) / d
+    assert abs(ux - 0.0) < TOL and abs(uy - (-cy)) < TOL, (ux, uy, -cy)             # KiCad frame: y down
+    assert abs(((ux - x1) ** 2 + (uy - y1) ** 2) ** 0.5 - r) < TOL
+    text = str(kp.child(arcs[0], "mid")[2])
+    assert len(text.split(".")[1]) > 4, f"mid y {text} is not written at KiCad's precision"
 
 
 def test_layer_table_ids_match_a_kicad9_board(cadpcb):

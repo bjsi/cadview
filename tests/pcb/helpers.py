@@ -84,6 +84,13 @@ def build_roundtrip_board(m):
 
 
 # --------------------------------------------------------------------------------------- re-expression ----
+def split_name(name: str) -> tuple:
+    """a board footprint's "Lib:Name" -> (lib, name).  A footprint placed without a library prefix (a KiCad 5 import, e.g.
+    hackrf's `GSG-MARK1MM`) is filed under the library `local`, since the DSL reads `<lib>.pretty/<name>.kicad_mod`."""
+    lib, sep, fname = name.partition(":")
+    return (lib, fname) if sep else ("local", name)
+
+
 def fallback_face(items: list) -> Face:
     """the bounding rectangle of the Edge.Cuts items (y-up): stands in when the outline cannot be built, so the rest of
     a board can still be compared"""
@@ -107,7 +114,7 @@ def reexpress(m, rec: kp.BoardRec, name: str, footprint_dir: str | None = None, 
     try:
         cache = {}
         for fp in rec.footprints:
-            lib, _, fname = fp.name.partition(":")
+            lib, fname = split_name(fp.name)
             if fp.name not in cache:
                 cache[fp.name] = m.kicad_footprint(lib, fname)
             b.place(cache[fp.name], fp.ref, (fp.x, -fp.y), rot=fp.rot, value=fp.value, center_pads=False,

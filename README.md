@@ -116,7 +116,7 @@ side) / `net()` / `keepout()` / `pour()` describe the board, and out come
 a `.kicad_pcb` + schematic an agent can edit and `kicad-cli` can check and
 export (`tools/pcb/kicad_export.sh`), tscircuit Circuit JSON for its router
 (`tools/pcb/export.mjs`), JLCPCB BOM + CPL, and `solid()` — the populated
-board back in the assembly. Proven against nine open-source KiCad boards
+board back in the assembly. Proven against eighteen open-source KiCad boards
 (`tests/pcb`). `pip install cadview[pcb]`.
 
 ## Review pages
