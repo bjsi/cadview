@@ -208,6 +208,16 @@ def show(*cad_objs, names=None, colors=None, alphas=None, **kwargs):
                 tracks.append([str(selector), action, list(times), list(values)])
             return tracks
 
+        def norm_chapters(raw):
+            # chapters: [{"t": seconds, "name": "..."}] or [(t, name)] — ticks on
+            # the scrub bar, the current one named next to the time, click to jump;
+            # snapshot(chapter=name) is an alias for its t
+            out = []
+            for ch in raw or []:
+                t, name = (ch["t"], ch["name"]) if isinstance(ch, dict) else ch
+                out.append({"t": float(t), "name": str(name)[:80]})
+            return sorted(out, key=lambda c: c["t"])
+
         speed = float(kwargs.get("animation_speed", 1.0))
         if isinstance(animation, dict):
             clips = [{"name": str(n), "tracks": norm_tracks(t), "speed": speed}
@@ -215,7 +225,8 @@ def show(*cad_objs, names=None, colors=None, alphas=None, **kwargs):
         elif animation and isinstance(animation[0], dict):
             clips = [{"name": str(c.get("name") or f"clip {i + 1}"),
                       "tracks": norm_tracks(c["tracks"]),
-                      "speed": float(c.get("speed", speed))}
+                      "speed": float(c.get("speed", speed)),
+                      **({"chapters": norm_chapters(c["chapters"])} if c.get("chapters") else {})}
                      for i, c in enumerate(animation)]
         else:
             clips = [{"name": "animation", "tracks": norm_tracks(animation),

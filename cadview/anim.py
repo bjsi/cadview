@@ -54,6 +54,24 @@ class Timeline:
         self._add(selector, "vis", start, start, 0.0)
         return self._add(selector, "vis", until, until, 1.0)
 
+    def chapter(self, name, start):
+        """Name the phase that begins at `start` — a tick on the viewer's scrub
+        bar, the name next to the time while it plays, click to jump,
+        snapshot(chapter=name)."""
+        self._chapters = getattr(self, "_chapters", [])
+        self._chapters.append({"t": float(start), "name": str(name)})
+        return self
+
+    def chapters(self):
+        return sorted(getattr(self, "_chapters", []), key=lambda c: c["t"])
+
+    def clip(self, name, speed=1.0, end=None):
+        """One entry for show(animation=[...]): tracks plus the chapters."""
+        out = {"name": name, "tracks": self.tracks(end), "speed": speed}
+        if self.chapters():
+            out["chapters"] = self.chapters()
+        return out
+
     def end_time(self):
         return max((e for segs in self._segs.values() for _, e, _ in segs),
                    default=0.0)

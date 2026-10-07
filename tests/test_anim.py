@@ -32,6 +32,17 @@ class TimelineTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             tl.move("a", "tx", 20, start=1, dur=2)
 
+    def test_chapters_ride_along_in_the_clip(self):
+        tl = Timeline()
+        tl.move("lid", "tz", 30, start=0, dur=1).chapter("open the lid", 0)
+        tl.move("tray", "tx", 80, start=1, dur=2).chapter("slide the tray", 1)
+        clip = tl.clip("assembly", speed=1.5)
+        self.assertEqual(clip["name"], "assembly")
+        self.assertEqual(clip["speed"], 1.5)
+        self.assertEqual(clip["chapters"], [{"t": 0.0, "name": "open the lid"}, {"t": 1.0, "name": "slide the tray"}])
+        self.assertEqual(len(clip["tracks"]), 2)
+        self.assertNotIn("chapters", Timeline().move("a", "tx", 1, start=0, dur=1).clip("plain"))
+
     def test_end_time_and_multiple_tracks(self):
         tl = Timeline()
         tl.spin("disc", "rz", 360, start=0, dur=6)

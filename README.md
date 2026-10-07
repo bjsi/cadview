@@ -63,7 +63,10 @@ A track is `(selector, action, times, values)`: selectors match part
 labels, actions are `tx/ty/tz` (mm), `rx/ry/rz` (degrees about the node's
 own origin), `vis` (show/hide) and `q`; tracks on the same node add
 together, and a node carries its children — the gripper rides Z2, Z2 rides
-Z1, Z1 rides the X carriage. Clips get a dropdown; ⚠ toggles the animated
+Z1, Z1 rides the X carriage. Clips get a dropdown; a clip's `chapters`
+(`[{"t": 4.0, "name": "feeder"}, …]`) become ticks on the scrub bar — the
+current one is named next to the time, a click jumps there, and
+`cadview_snapshot(chapter="feeder")` shoots it; ⚠ toggles the animated
 collision check. The gif is a real lab gantry (266 parts, its source lives
 in its own repo) driven by exactly such tracks on its carriages, Z stages,
 gripper fingers and the ring; `examples/gantry.py` is a simplified machine

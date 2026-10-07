@@ -328,10 +328,16 @@ async function snapshot() {
         const only = partIds(p.only), hide = partIds(p.hide);
         if (only.size) setVisible([...partsIndex.keys()].filter((k) => !only.has(k)), false);
         if (hide.size) setVisible([...hide], false);
-        if (animClips.length && (p.clip != null || p.t != null)) {
+        if (animClips.length && (p.clip != null || p.t != null || p.chapter != null)) {
             const byName = animClips.findIndex((c) => c.name === p.clip);
             loadClip(p.clip == null ? 0 : byName >= 0 ? byName : Math.max(0, +p.clip || 0));
-            applyAnimTime(parseFloat(p.t) || 0);
+            let t = parseFloat(p.t) || 0;
+            if (p.chapter != null) {   // chapter=<name>: the shot at that chapter's time
+                const want = String(p.chapter).toLowerCase();
+                const ch = (anim?.chapters || []).find((c) => c.name.toLowerCase() === want);
+                if (ch) t = ch.t;
+            }
+            applyAnimTime(t);
             modelGroup.updateMatrixWorld(true);
         }
         if (p.clearance === "0") setClearanceOn(false);   // no collision tint in the shot
@@ -530,6 +536,7 @@ function openTrayFor(id) {
 const animBar = document.getElementById("animbar");
 const playBtn = document.getElementById("anim-play");
 const scrub = document.getElementById("anim-scrub");
+const ticks = document.getElementById("anim-ticks");
 const timeLabel = document.getElementById("anim-time");
 const clipSel = document.getElementById("anim-clip");
 let anim = null, animRAF = 0, animPrev = 0;
@@ -591,9 +598,20 @@ function loadClip(index) {
     if (!tracks.length || duration <= 0) { animBar.hidden = true; render(); return; }
     const animated = new Set();
     tracks.forEach((tr) => tr.groups.forEach((g) => animated.add(g)));
-    anim = { tracks, animated, duration, speed: spec.speed || 1, playing: false, t: 0 };
+    anim = { tracks, animated, duration, speed: spec.speed || 1, playing: false, t: 0,
+             chapters: (spec.chapters || []).filter((c) => c && typeof c.t === "number") };
     scrub.max = duration;
     scrub.step = duration / 500;
+    // chapters (assembly phases etc.): a tick each; click jumps there
+    ticks.textContent = "";
+    for (const ch of anim.chapters) {
+        const el = document.createElement("span");
+        el.className = "tick";
+        el.style.left = (100 * Math.min(1, Math.max(0, ch.t / duration))) + "%";
+        el.title = `${ch.name} · ${(+ch.t).toFixed(1)}s`;
+        el.addEventListener("click", (e) => { e.stopPropagation(); applyAnimTime(ch.t); });
+        ticks.append(el);
+    }
     clipSel.value = index;
     animBar.hidden = false;
     collectClearance();
@@ -653,7 +671,11 @@ function applyAnimTime(t) {
     if (hoverMark && hoverSrcMesh) hoverMark.matrix.copy(hoverSrcMesh.matrixWorld);
     updateClearance();
     scrub.value = t;
-    timeLabel.textContent = t.toFixed(1) + "s";
+    let current = null;
+    anim.chapters.forEach((ch, i) => { if (ch.t <= t + 1e-6) current = i; });
+    timeLabel.textContent = t.toFixed(1) + "s" + (current !== null ? " · " + anim.chapters[current].name : "");
+    timeLabel.title = current !== null ? anim.chapters[current].name : "";
+    ticks.querySelectorAll(".tick").forEach((el, i) => el.classList.toggle("on", i === current));
     render();
 }
 

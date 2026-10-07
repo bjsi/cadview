@@ -66,7 +66,9 @@ const TOOLS = [
                 yaw: { type: "number", description: "degrees to spin the camera about its up axis around the target (turntable)" },
                 t: { type: "number" },
                 clearance: { type: "number", description: "0 to leave the collision tint out of the shot" },
-                clip: { description: "clip name or index" }, w: { type: "number" }, h: { type: "number" },
+                clip: { description: "clip name or index" },
+                chapter: { type: "string", description: "a clip chapter's name — the shot is taken at its time (instead of t)" },
+                w: { type: "number" }, h: { type: "number" },
             },
         },
     },
@@ -112,7 +114,7 @@ async function callTool(name, args) {
     if (name === "cadview_snapshot") {
         const project = args.project || DEFAULT_PROJECT;
         const q = new URLSearchParams({ name: project });
-        for (const k of ["view", "focus", "hide", "only", "zoom", "yaw", "t", "clip", "clearance", "w", "h"])
+        for (const k of ["view", "focus", "hide", "only", "zoom", "yaw", "t", "clip", "chapter", "clearance", "w", "h"])
             if (args[k] != null && args[k] !== "") q.set(k, String(args[k]));
         const resp = await fetch(`${URL_BASE}/api/snapshot?${q}`, { signal: AbortSignal.timeout(70000) });
         if (!resp.ok) throw new Error("cadview server said HTTP " + resp.status + ": " + await resp.text());

@@ -131,7 +131,12 @@ JOG = [
     ("X carriage", "tx", [0, 0.75, 1.5, 2.25, 3.0], [-380, 380, -380, 380, -380]),
 ]
 
+# chapters: ticks on the scrub bar, named next to the time, click to jump,
+# cadview_snapshot(chapter="grip") for an agent
+CHAPTERS = [(0, "approach"), (3.0, "descend"), (3.8, "grip"), (4.5, "lift & carry"), (7.0, "place"), (8.0, "release")]
+
 if __name__ == "__main__":
     from cadview import show
     show(build(), title="Gantry",
-         animation=[{"name": "pick & place", "tracks": PICK}, {"name": "jog", "tracks": JOG, "speed": 1}])
+         animation=[{"name": "pick & place", "tracks": PICK, "chapters": CHAPTERS},
+                    {"name": "jog", "tracks": JOG, "speed": 1}])
