@@ -15,6 +15,9 @@
     "circuit-json-to-step": "0.0.43",
     "circuit-to-svg": "0.0.445"
   },
+  "overrides": {
+    "@tscircuit/pcb-trace-linter": "file:./vendor/pcb-trace-linter"
+  },
   "scripts": {
     "preinstall": "test -d vendor/pcb-trace-linter || (mkdir -p vendor && curl -sL https://codeload.github.com/tscircuit/pcb-trace-linter/tar.gz/4c035f9d40ffb03ba547a08975b5e64b20371123 | tar xz -C vendor && mv vendor/pcb-trace-linter-* vendor/pcb-trace-linter)"
   }

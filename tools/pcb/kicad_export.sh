@@ -21,4 +21,12 @@ run "$K" pcb export drill --excellon-separate-th --generate-map --map-format ger
 run "$K" pcb export pos --format csv --units mm --side both -o "$OUT/pos.csv" "$PCB"
 (cd "$OUT/gerbers" && rm -f ../gerbers.zip && zip -q ../gerbers.zip *.g* *.drl && echo "== gerbers.zip: $(ls | wc -l) files (KiCad Protel extensions, what JLCPCB's upload expects)")
 run "$K" pcb export svg --layers F.Cu,B.Cu,Edge.Cuts,F.SilkS -o "$OUT/board.svg" "$PCB"
+SCH=${PCB%.kicad_pcb}.kicad_sch
+if [ -f "$SCH" ]; then
+  echo "== $K sch erc"; "$K" sch erc --format json --severity-all --exit-code-violations -o "$OUT/erc.json" "$SCH" 2>&1 | grep -v "^$" | tail -3
+  echo "   erc exit ${PIPESTATUS[0]} (nonzero = violations)"
+  run "$K" sch export netlist --format kicadsexpr -o "$OUT/schematic.net" "$SCH"
+  run "$K" sch export svg -o "$OUT/" "$SCH"
+  run "$K" sch export pdf -o "$OUT/schematic.pdf" "$SCH"
+fi
 ls -la "$OUT" "$OUT/gerbers" | sed 's/^/   /'

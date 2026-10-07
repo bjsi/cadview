@@ -16,7 +16,8 @@ footprints' STEP models on it, so it sits in the assembly without a round trip.
 
 Units mm, Z up; Circuit JSON is y-up too, KiCad footprints are y-down and are flipped on read.  Implemented: smd and
 through-hole pads (rect / roundrect / oval / circle), rotations in multiples of 90 deg, circle holes, polygon cutouts,
-rect keepouts, copper pours, hand traces + vias, silkscreen text, 2 layers.  Needs build123d; shapely for outlines
+rect keepouts, copper pours, hand traces + vias, silkscreen text, 2 layers; `kicad_sch()` writes a
+schematic (global labels per net) and `check_netlist()` proves it against the board.  Needs build123d; shapely for outlines
 (`pip install cadview[pcb]`); KiCad's footprint + 3D libraries on disk (KICAD_FOOTPRINTS / KICAD_3DMODELS).
 """
 from __future__ import annotations
@@ -34,6 +35,7 @@ except ImportError:          # the parser / writers still work without CAD
 
 KICAD_FP = os.environ.get("KICAD_FOOTPRINTS", "/usr/share/kicad/footprints")   # KiCad 10 (Arch package kicad-library 10.0.x)
 KICAD_3D = os.environ.get("KICAD_3DMODELS", "/usr/share/kicad/3dmodels")
+KICAD_SYM = os.environ.get("KICAD_SYMBOLS", "/usr/share/kicad/symbols")
 _MODEL_VAR = re.compile(r"\$\{KICAD\d*_3DMODEL_DIR\}")
 
 
@@ -144,6 +146,52 @@ def kicad_footprint(lib: str, name: str) -> Footprint:
     return Footprint(name, pads, model, lib, tree)
 
 
+# ------------------------------------------------------------------ KiCad symbol reader ----
+_SYM_LIBS: dict = {}
+
+
+@dataclass
+class Symbol:
+    lib: str
+    name: str
+    tree: list                    # the (symbol "lib:name" ...) tree, flattened (no `extends`), ready for lib_symbols
+    pins: list                    # (number, x, y, angle, type) in symbol frame (y up), all units
+
+
+def _sym_lib(lib):
+    if lib not in _SYM_LIBS:
+        with open(os.path.join(KICAD_SYM, f"{lib}.kicad_sym")) as f: tree = _sexp(f.read())
+        _SYM_LIBS[lib] = {n[1]: n for n in tree if isinstance(n, list) and n and n[0] == "symbol"}
+    return _SYM_LIBS[lib]
+
+
+def kicad_symbol(lib: str, name: str) -> Symbol:
+    """Read `<KICAD_SYMBOLS>/<lib>.kicad_sym` symbol `name`; a derived symbol (`extends`) is flattened onto its parent."""
+    import copy
+    lib_syms = _sym_lib(lib)
+    node = lib_syms[name]
+    ext = _kv(node, "extends")
+    if ext:
+        parent = copy.deepcopy(lib_syms[ext[1]])
+        props = {n[1]: n for n in node if isinstance(n, list) and n[0] == "property"}
+        out = [parent[0], Q(name)]
+        for n in parent[2:]:
+            if isinstance(n, list) and n[0] == "property" and n[1] in props: n = props.pop(n[1])
+            if isinstance(n, list) and n[0] == "symbol": n[1] = Q(n[1].replace(ext[1] + "_", name + "_", 1))
+            out.append(n)
+        out += list(props.values())
+        node = out
+    else:
+        node = copy.deepcopy(node)
+    pins = []
+    for unit in (n for n in node if isinstance(n, list) and n[0] == "symbol"):
+        for p in (n for n in unit if isinstance(n, list) and n[0] == "pin"):
+            at = _kv(p, "at"); num = _kv(p, "number")
+            pins.append((str(num[1]), at[1], at[2], at[3] if len(at) > 3 else 0.0, p[1]))
+    node[1] = Q(f"{lib}:{name}")
+    return Symbol(lib, name, node, pins)
+
+
 # ---------------------------------------------------------------------- geometry from CAD ----
 def _poly_from_wire(wire: Wire, step=0.25, tol=0.01):
     """Sample a closed wire every `step` mm and simplify (Douglas-Peucker, `tol`): arcs become chords, corners stay exact."""
@@ -176,6 +224,7 @@ class Placed:
     lcsc: str = ""                 # LCSC C-number (JLCPCB assembly); "" = not assembled (sourced separately)
     note: str = ""                 # BOM note: stock / basic-extended / "assumed"
     ref_at: tuple | None = None    # where the Reference silkscreen goes (footprint frame, y up); None = the library's place
+    symbol: tuple | None = None    # ("Lib", "Name") in KiCad's symbol libraries, for the schematic
 
     def pad_xy(self, pad: Pad):
         a = math.radians(self.rot); c, s = math.cos(a), math.sin(a)
@@ -205,7 +254,7 @@ class Board:
         self.track_width, self.via_dims = 0.3, (0.6, 0.3)
 
     # --- authoring
-    def place(self, fp: Footprint, ref: str, at, rot=0.0, value="", mpn="", center_pads=True, lcsc="", note="", ref_at=None) -> Placed:
+    def place(self, fp: Footprint, ref: str, at, rot=0.0, value="", mpn="", center_pads=True, lcsc="", note="", ref_at=None, symbol=None) -> Placed:
         """`at` is where the part's pad-bbox centre goes (KiCad footprints often have their origin on pin 1, e.g. the Pico THT one);
         center_pads=False puts the footprint origin there instead."""
         ox = oy = 0.0
@@ -213,7 +262,7 @@ class Board:
             xs, ys = [q.x for q in fp.pads], [q.y for q in fp.pads]
             cx, cy = (min(xs) + max(xs)) / 2, (min(ys) + max(ys)) / 2
             a = math.radians(rot); ox, oy = -(cx * math.cos(a) - cy * math.sin(a)), -(cx * math.sin(a) + cy * math.cos(a))
-        p = Placed(ref, fp, round(at[0] + ox, 4), round(at[1] + oy, 4), rot % 360, value, mpn, lcsc=lcsc, note=note, ref_at=ref_at); self.parts.append(p); return p
+        p = Placed(ref, fp, round(at[0] + ox, 4), round(at[1] + oy, 4), rot % 360, value, mpn, lcsc=lcsc, note=note, ref_at=ref_at, symbol=symbol); self.parts.append(p); return p
 
     def label(self, text, at, rot=0.0, size=1.0, layer="F.SilkS"):
         """silkscreen text (KiCad only; Circuit JSON gets a pcb_silkscreen_text)"""
@@ -450,6 +499,105 @@ class Board:
         root.append(["embedded_fonts", "no"])
         return _ser(root) + "\n"
 
+    # --- schematic: one symbol per part, every net a global label on its pins, no wires
+    def kicad_sch(self, name, layout=None, power_flags=True, pin_types=None) -> str:
+        """A KiCad 10 .kicad_sch for the same parts and nets.  `layout`: list of columns, each a list of refs, left to right
+        (parts not listed go in a last column).  Pins with no net get a no-connect; a power net ('+...', '3V3', 'GND') with no
+        power-output pin on it gets a PWR_FLAG so ERC sees a driver.  `pin_types`: {(ref, pin): "passive" | ...} overrides the
+        library's electrical type in the embedded symbol (e.g. a second power-output GND pin on a net that already has one)."""
+        import copy, uuid as _uuid
+        U = lambda: Q(str(_uuid.uuid4()))
+        root_uuid = str(_uuid.uuid4())
+        font = lambda hide=False: ["effects", ["font", ["size", 1.27, 1.27]]] + ([["hide", "yes"]] if hide else [])
+        pad_net = {(r, n): net for net, pins in self.nets.items() for r, n in pins}
+        syms = {}
+        for p in self.parts:
+            if not p.symbol: raise ValueError(f"{p.ref}: no symbol given (place(..., symbol=('Lib', 'Name')))")
+            syms[p.ref] = kicad_symbol(*p.symbol)
+            for (ref, num), kind in (pin_types or {}).items():
+                if ref != p.ref: continue
+                s = syms[p.ref]
+                for unit in (n for n in s.tree if isinstance(n, list) and n[0] == "symbol"):
+                    for pin in (n for n in unit if isinstance(n, list) and n[0] == "pin"):
+                        if str(_kv(pin, "number")[1]) == str(num): pin[1] = kind
+                s.pins = [(n, x, y, a, kind if n == str(num) else k) for n, x, y, a, k in s.pins]
+        net_power_out = {net for p in self.parts for num, _, _, _, kind in syms[p.ref].pins if kind == "power_out" for net in [pad_net.get((p.ref, num))] if net}
+        lib_symbols = {f"{s.lib}:{s.name}": s.tree for s in syms.values()}
+        flag = kicad_symbol("power", "PWR_FLAG") if power_flags else None
+        if flag: lib_symbols["power:PWR_FLAG"] = flag.tree
+        # columns: stack each part by its pin extent, 10 mm apart; columns 70 mm apart
+        cols = [list(c) for c in (layout or [])]
+        rest = [p.ref for p in self.parts if not any(p.ref in c for c in cols)]
+        if rest: cols.append(rest)
+        els, x = [], 40.0
+        G = lambda v: round(round(v / 1.27) * 1.27, 2)                                     # KiCad's 50 mil grid
+        for col in cols:
+            y = 40.0
+            for ref in col:
+                p = next(q for q in self.parts if q.ref == ref); s = syms[ref]
+                ys = [py for _, _, py, _, _ in s.pins] or [0.0]; xs = [px for px, *_ in [(pp[1],) for pp in s.pins]] or [0.0]
+                top = max(ys); bottom = min(ys)
+                Y = G(y + top + 2.54)                                                  # symbol origin so its highest pin sits 2.54 below y
+                X = G(x)
+                inst = ["symbol", ["lib_id", Q(f"{s.lib}:{s.name}")], ["at", X, Y, 0.0], ["unit", 1.0], ["exclude_from_sim", "no"], ["in_bom", "yes"], ["on_board", "yes"], ["dnp", "no"], ["uuid", U()]]
+                inst.append(["property", Q("Reference"), Q(p.ref), ["at", G(X + max(xs) + 2.54), G(Y - top - 1.27), 0.0], font()])
+                inst.append(["property", Q("Value"), Q(p.value), ["at", G(X + max(xs) + 2.54), G(Y - top + 1.27), 0.0], font()])
+                inst.append(["property", Q("Footprint"), Q(f"{p.fp.lib}:{p.fp.name}"), ["at", X, Y, 0.0], font(True)])
+                inst.append(["property", Q("Datasheet"), Q(""), ["at", X, Y, 0.0], font(True)])
+                inst.append(["property", Q("LCSC"), Q(p.lcsc), ["at", X, Y, 0.0], font(True)])
+                seen = set()
+                for num, px, py, ang, kind in s.pins:
+                    inst.append(["pin", Q(num), ["uuid", U()]])
+                    sx, sy = G(X + px), G(Y - py)
+                    if (sx, sy) in seen: continue                                      # stacked pins share one label
+                    seen.add((sx, sy))
+                    net = pad_net.get((p.ref, num))
+                    rot = (ang + 180) % 360                                            # label points away from the body
+                    if net:
+                        els.append(["global_label", Q(net), ["shape", "input"], ["at", sx, sy, rot], ["fields_autoplaced", "yes"],
+                                    ["effects", ["font", ["size", 1.27, 1.27]], ["justify", "left" if rot in (0, 90) else "right"]], ["uuid", U()],
+                                    ["property", Q("Intersheetrefs"), Q("${INTERSHEET_REFS}"), ["at", sx, sy, 0.0], font(True)]])
+                    elif kind != "no_connect":
+                        els.append(["no_connect", ["at", sx, sy], ["uuid", U()]])
+                inst.append(["instances", ["project", Q(name), ["path", Q("/" + root_uuid), ["reference", Q(p.ref)], ["unit", 1.0]]]])
+                els.append(inst)
+                y = y + (top - bottom) + 2.54 + 12.7
+            x += 76.2
+        if flag:
+            fx, fy = G(x), 40.0
+            fnum, fpx, fpy, fang, _ = flag.pins[0]
+            for i, net in enumerate(n for n in self.nets if n.startswith(("+", "3V3", "GND")) and n not in net_power_out):
+                X, Y = G(fx), G(fy + i * 12.7)
+                els.append(["symbol", ["lib_id", Q("power:PWR_FLAG")], ["at", X, Y, 0.0], ["unit", 1.0], ["exclude_from_sim", "no"], ["in_bom", "yes"], ["on_board", "yes"], ["dnp", "no"], ["uuid", U()],
+                            ["property", Q("Reference"), Q(f"#FLG{i + 1}"), ["at", X, Y, 0.0], font(True)], ["property", Q("Value"), Q("PWR_FLAG"), ["at", G(X + 2.54), Y, 0.0], font()],
+                            ["property", Q("Footprint"), Q(""), ["at", X, Y, 0.0], font(True)], ["property", Q("Datasheet"), Q("~"), ["at", X, Y, 0.0], font(True)],
+                            ["pin", Q(fnum), ["uuid", U()]], ["instances", ["project", Q(name), ["path", Q("/" + root_uuid), ["reference", Q(f"#FLG{i + 1}")], ["unit", 1.0]]]]])
+                sx, sy = G(X + fpx), G(Y - fpy); rot = (fang + 180) % 360
+                els.append(["global_label", Q(net), ["shape", "input"], ["at", sx, sy, rot], ["fields_autoplaced", "yes"],
+                            ["effects", ["font", ["size", 1.27, 1.27]], ["justify", "left" if rot in (0, 90) else "right"]], ["uuid", U()],
+                            ["property", Q("Intersheetrefs"), Q("${INTERSHEET_REFS}"), ["at", sx, sy, 0.0], font(True)]])
+        root = ["kicad_sch", ["version", 20250114.0], ["generator", Q("cadview.pcb")], ["generator_version", Q("0.1")], ["uuid", Q(root_uuid)], ["paper", Q("A3")],
+                ["title_block", ["title", Q(self.name)], ["date", Q(__import__("datetime").date.today().isoformat())], ["comment", 1.0, Q("generated by cadview.pcb from the build123d board - nets are global labels, no wires")]],
+                ["lib_symbols"] + list(lib_symbols.values())] + els + [["sheet_instances", ["path", Q("/"), ["page", Q("1")]]], ["embedded_fonts", "no"]]
+        self._root_uuid = root_uuid
+        return _ser(root) + "\n"
+
+    def check_netlist(self, path) -> list:
+        """compare a `kicad-cli sch export netlist` (kicadsexpr) with the board's nets: returns the mismatches (empty = agree)"""
+        with open(path) as f: tree = _sexp(f.read())
+        nets = _kv(tree, "nets") or []
+        sch = {}
+        for n in nets[1:]:
+            name = _kv(n, "name")[1]
+            if name.startswith("unconnected-"): continue                              # KiCad's one-pin nets for no-connects
+            sch[name] = {(_kv(nd, "ref")[1], str(_kv(nd, "pin")[1])) for nd in n if isinstance(nd, list) and nd[0] == "node"}
+        pcb = {name: {(r, str(p)) for r, p in pins} for name, pins in self.nets.items()}
+        out = []
+        for name in sorted(set(sch) | set(pcb)):
+            a, b = sch.get(name, set()), pcb.get(name, set())
+            if a != b: out.append((name, sorted(a - b), sorted(b - a)))
+        return out
+
     def kicad_pro(self, name) -> str:
         rules = dict(self.rules, min_via_drill=self.via_dims[1] if False else self.rules.get("min_through_hole_diameter", 0.3))
         sev = {"lib_footprint_issues": "warning", "lib_footprint_mismatch": "warning", "silk_over_copper": "error", "courtyards_overlap": "error",
@@ -458,7 +606,8 @@ class Board:
         return json.dumps({"meta": {"filename": f"{name}.kicad_pro", "version": 1},
                            "board": {"design_settings": {"rules": rules, "rule_severities": sev,
                                                          "track_widths": [0.0, self.track_width, 0.5], "via_dimensions": [{"diameter": 0.0, "drill": 0.0}, {"diameter": self.via_dims[0], "drill": self.via_dims[1]}]}},
-                           "boards": [], "libraries": {"pinned_footprint_libs": [], "pinned_symbol_libs": []}, "text_variables": {}}, indent=2)
+                           "boards": [], "libraries": {"pinned_footprint_libs": [], "pinned_symbol_libs": []}, "text_variables": {},
+                           "sheets": [[getattr(self, "_root_uuid", ""), "Root"]], "schematic": {"legacy_lib_dir": "", "legacy_lib_list": []}}, indent=2)
 
     def netlist(self, name) -> str:
         """KiCad netlist (`File > Import Netlist` in pcbnew): components + nets, so the GUI path works without a schematic."""
@@ -466,9 +615,10 @@ class Board:
         nets = [["net", ["code", Q(str(i + 1))], ["name", Q(n)]] + [["node", ["ref", Q(r)], ["pin", Q(pad)]] for r, pad in pins] for i, (n, pins) in enumerate(self.nets.items())]
         return _ser(["export", ["version", Q("E")], ["design", ["source", Q(f"{name}.py")], ["tool", Q("cadview.pcb")]], ["components"] + comps, ["nets"] + nets]) + "\n"
 
-    def write_kicad(self, outdir, name, traces=None):
+    def write_kicad(self, outdir, name, traces=None, layout=None, pin_types=None):
+        """the KiCad project: .kicad_pcb, .kicad_sch (layout = schematic columns of refs), .kicad_pro, .net"""
         paths = []
-        for ext, txt in ((".kicad_pcb", self.kicad_pcb(traces)), (".kicad_pro", self.kicad_pro(name)), (".net", self.netlist(name))):
+        for ext, txt in ((".kicad_pcb", self.kicad_pcb(traces)), (".kicad_sch", self.kicad_sch(name, layout, pin_types=pin_types)), (".kicad_pro", self.kicad_pro(name)), (".net", self.netlist(name))):
             p = os.path.join(outdir, name + ext)
             with open(p, "w") as f: f.write(txt)
             paths.append(p)

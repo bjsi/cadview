@@ -45,6 +45,28 @@ class PcbTests(unittest.TestCase):
         with self.assertRaises(KeyError):
             fp.pad(9)
 
+    def test_kicad_symbol_flattens_a_derived_symbol_onto_its_parent(self):
+        lib = '''(kicad_symbol_lib (version 20241209) (generator "x")
+  (symbol "R_Base" (pin_numbers (hide yes)) (in_bom yes) (on_board yes)
+    (property "Reference" "R" (at 0 0 0) (effects (font (size 1.27 1.27))))
+    (property "Value" "R_Base" (at 0 0 0) (effects (font (size 1.27 1.27))))
+    (symbol "R_Base_1_1"
+      (pin passive line (at 0 3.81 270) (length 1.27) (name "~" (effects (font (size 1.27 1.27)))) (number "1" (effects (font (size 1.27 1.27)))))
+      (pin passive line (at 0 -3.81 90) (length 1.27) (name "~" (effects (font (size 1.27 1.27)))) (number "2" (effects (font (size 1.27 1.27)))))))
+  (symbol "R_Small" (extends "R_Base")
+    (property "Value" "R_Small" (at 0 0 0) (effects (font (size 1.27 1.27)))))
+)
+'''
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "Device.kicad_sym").write_text(lib)
+            with patch.object(pcb, "KICAD_SYM", tmp), patch.dict(pcb._SYM_LIBS, {}, clear=True):
+                sym = pcb.kicad_symbol("Device", "R_Small")
+        self.assertEqual((sym.lib, sym.name), ("Device", "R_Small"))
+        self.assertEqual(sym.tree[1], "Device:R_Small")                  # named for lib_symbols
+        self.assertIsNone(pcb._kv(sym.tree, "extends"))                 # flattened: no extends left
+        self.assertEqual([n[1] for n in sym.tree if isinstance(n, list) and n[0] == "symbol"], ["R_Small_1_1"])
+        self.assertEqual(sorted(p[0] for p in sym.pins), ["1", "2"])
+
     def test_placed_part_rotates_its_pads_about_its_origin(self):
         fp = pcb.Footprint("f", [pcb.Pad("1", "smd", "rect", 2.0, 0.0, 1, 1)], None)
         self.assertEqual(pcb.Placed("U1", fp, 10.0, 5.0, 0.0).pad_xy(fp.pads[0]), (12.0, 5.0))
