@@ -165,6 +165,41 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(inline['data'], box_scene(10)['data'])
         self.assertNotIn('source_file', inline['meta'])          # push-side meta stripped
 
+    async def test_scoped_listener_shows_one_scene_family_read_only(self):
+        await self.push(project='demo')
+        await self.push(project='arenas-v71')
+        await self.push(project='arenas')
+        # make the test listener a scoped one for the "arenas*" family
+        with patch.object(server, 'SCOPES', [('127.0.0.1', self.client.port, ['arenas', 'arenas-*'])]):
+            rows = (await (await self.client.get('/api/runnable')).json())['projects']
+            self.assertEqual(sorted(r['project'] for r in rows), ['arenas', 'arenas-v71'])
+            status = await (await self.client.get('/api/status')).json()
+            self.assertEqual(sorted(status['projects']), ['arenas', 'arenas-v71'])
+            self.assertEqual((await self.client.get('/api/scene?name=arenas-v71')).status, 200)
+            self.assertEqual((await self.client.get('/api/scene?name=demo')).status, 404)
+            self.assertEqual((await self.client.get('/demo')).status, 404)
+            self.assertEqual((await self.client.get('/thumbs/demo.png')).status, 404)
+            self.assertEqual((await self.client.get('/api/parts?name=demo')).status, 404)
+            self.assertEqual((await self.client.get('/arenas-v71')).status, 200)
+            self.assertEqual((await self.client.get('/')).status, 200)
+            # read-only: pushes, deletes, runs refused; a page's own posts still work
+            self.assertEqual((await self.client.post('/api/scene?name=arenas', json=box_scene(3))).status, 403)
+            self.assertEqual((await self.client.delete('/api/scene?name=arenas')).status, 403)
+            self.assertEqual((await self.client.post('/api/run', json={'project': 'arenas'})).status, 403)
+            sel = await self.client.post('/api/selection?name=arenas', json={'items': [], 'camera': None})
+            self.assertIn(sel.status, (200, 400))
+            # websockets: must name an in-scope scene; never a snapshot renderer
+            with self.assertRaises(Exception):
+                await self.client.ws_connect('/ws')
+            with self.assertRaises(Exception):
+                await self.client.ws_connect('/ws?scene=demo')
+            ws = await self.client.ws_connect('/ws?scene=arenas')
+            self.assertTrue(any(w in self.app['helpers'] for w in self.app['websockets']))
+            self.assertEqual((await self.client.get('/api/snapshot?name=arenas')).status, 503)
+            await ws.close()
+        # off the scoped listener everything is back
+        self.assertEqual((await self.client.get('/api/scene?name=demo')).status, 200)
+
     def test_client_scene_name_comes_from_the_nearest_manifest(self):
         from cadview import client
         root = Path(self.tmp.name) / 'repo'

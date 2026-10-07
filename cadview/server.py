@@ -15,6 +15,7 @@ scene only, http://host:3941/ shows whatever was pushed last, any project.
 
 import argparse
 import errno
+import fnmatch
 import array
 import asyncio
 import base64
@@ -78,8 +79,60 @@ def _peer(request) -> str:
     return (request.remote or "").removeprefix("::ffff:")
 
 
+# ---- scoped listeners: one more address that shows ONE family of scenes ----
+# CADVIEW_SCOPES="100.82.91.37:3941=arenas,arenas-*;10.0.0.5:3941=widget*"
+# The server also binds each address. A request arriving there is read-only
+# (GET plus the POSTs a viewer page itself makes), sees only scenes matching
+# the globs — gallery, /api/*, /<scene>, /thumbs, /ws all 404 outside them —
+# and is accepted from any peer that can reach the address: that network's
+# own access control is the gate, not CADVIEW_PEERS. Pages opened there are
+# never asked to render snapshots of other scenes. For sharing one project
+# with a team on a network that must not see the rest.
+SCOPES = []
+for _spec in filter(None, (os.environ.get("CADVIEW_SCOPES") or "").split(";")):
+    _addr, _, _pats = _spec.partition("=")
+    _host, _, _port = _addr.strip().rpartition(":")
+    SCOPES.append((_host.strip("[] "), int(_port), [p.strip() for p in _pats.split(",") if p.strip()]))
+SCOPED_POSTS = {"/api/thumb", "/api/selection", "/api/snapshot", "/api/boot-error"}
+
+
+def _scope_of(request):
+    """The glob list when the request came in on a scoped listener, else None."""
+    if not SCOPES or request.transport is None:
+        return None
+    sock = request.transport.get_extra_info("sockname")
+    if not sock:
+        return None
+    for host, port, pats in SCOPES:
+        if sock[0] == host and sock[1] == port:
+            return pats
+    return None
+
+
+def _in_scope(pats, project):
+    return any(fnmatch.fnmatchcase(project, p) for p in pats)
+
+
+def _request_project(request):
+    name = request.query.get("name") or request.query.get("scene") or request.match_info.get("project")
+    if not name and request.path.startswith("/thumbs/"):
+        name = request.path[len("/thumbs/"):].rsplit(".", 1)[0]
+    return name
+
+
 @web.middleware
 async def device_gate(request, handler):
+    pats = _scope_of(request)
+    if pats is not None:
+        if request.method not in ("GET", "HEAD") and not (request.method == "POST" and request.path in SCOPED_POSTS):
+            raise web.HTTPForbidden(text="this address is a read-only view")
+        project = _request_project(request)
+        if project and not _in_scope(pats, project):
+            raise web.HTTPNotFound(text="no such scene here")
+        if request.path == "/ws" and not project and request.query.get("role") != "renderer":
+            raise web.HTTPForbidden(text="name a scene")
+        request["scope"] = pats
+        return await handler(request)
     if _peer(request) in ALLOWED_PEERS:
         return await handler(request)
     tok = _hub_token()
@@ -285,7 +338,7 @@ def _tls_redirect(request):
     canonical host matters: certs name a FQDN, so short-name requests must
     redirect to CADVIEW_TLS_HOST, not echo their own Host header."""
     if (os.environ.get("CADVIEW_TLS_CERT") and request.scheme == "http"
-            and _peer(request) not in ("127.0.0.1", "::1")):
+            and _peer(request) not in ("127.0.0.1", "::1") and request.get("scope") is None):
         host = os.environ.get("CADVIEW_TLS_HOST") or request.host.rsplit(":", 1)[0]
         port = os.environ.get("CADVIEW_TLS_PORT", "3943")
         raise web.HTTPTemporaryRedirect(f"https://{host}:{port}{request.path_qs}")
@@ -377,9 +430,11 @@ async def handle_delete_scene(request):
 
 async def handle_status(request):
     store = request.app["store"]
+    pats = request.get("scope")
+    visible = [p for p in store.text if pats is None or _in_scope(pats, p)]
     return web.json_response({
-        "latest": store.latest,
-        "projects": {p: {"meta": store.meta.get(p, {}), "bytes": len(t)} for p, t in store.text.items()},
+        "latest": store.latest if pats is None else None,
+        "projects": {p: {"meta": store.meta.get(p, {}), "bytes": len(store.text[p])} for p in visible},
         "viewers": len(request.app["websockets"]),
     })
 
@@ -808,6 +863,9 @@ async def handle_runnable(request):
                 if best is None or len(p) > len(best):
                     best = p
         r["group"] = (named[best]["group"] or best) if best else r["project"]
+    pats = request.get("scope")
+    if pats is not None:
+        rows = [r for r in rows if _in_scope(pats, r["project"])]
     rows.sort(key=lambda r: r["received_at"] or "", reverse=True)
     return web.json_response({"projects": rows})
 
@@ -1428,8 +1486,8 @@ async def handle_ws(request):
             request.app["websockets"][ws] = scope
             if renderer:
                 request.app["renderers"].add(ws)
-            if request.query.get("helper"):
-                request.app["helpers"].add(ws)
+            if request.query.get("helper") or request.get("scope") is not None:
+                request.app["helpers"].add(ws)      # scoped pages must not render other scenes
             if request.query.get("updates") == "revision":
                 request.app["revision_sockets"].add(ws)
             store = request.app["store"]
@@ -1558,6 +1616,12 @@ def main():
             log.info("cadview already serving http://%s:%d — using it", args.host, args.port)
             await asyncio.Event().wait()
         urls = [f"http://{args.host}:{args.port}"]
+        for host, port, pats in SCOPES:
+            try:
+                await web.TCPSite(runner, host, port).start()
+                urls.append(f"http://{host}:{port} (only {', '.join(pats)})")
+            except OSError as e:
+                log.warning("scoped listener %s:%d not bound (%s) — is that address up?", host, port, e)
         if args.tls_cert and args.tls_key:
             import ssl
             ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
