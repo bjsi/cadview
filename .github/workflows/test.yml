@@ -37,5 +37,6 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq --no-install-recommends kicad kicad-footprints kicad-symbols kicad-packages3d libgl1 libglu1-mesa
           kicad-cli version
-      - run: pip install -e ".[pcb,dev]" build123d
+      # build123d 0.10 = OCP 7.8, the stack the suite's OCP-level fixtures (TColgp arrays) and its consumer repos run on
+      - run: pip install -e ".[pcb,dev]" "build123d==0.10.0"
       - run: python -m pytest tests/pcb -q -ra
