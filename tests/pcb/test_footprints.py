@@ -112,6 +112,36 @@ def test_hex_timestamp_stays_a_symbol(cadpcb, tmp_path):
     assert "(tedit 527E5841)" in text and "(tedit 50997E90)" in text and "inf" not in text
 
 
+def test_unlocked_text_position_turns_with_the_part(cadpcb, tmp_path):
+    """a KiCad 7 footprint writes a text's position as `(at x y unlocked)` or `(at x y 180 unlocked)` (placebo's, olimex's);
+    the writer added the part's rotation to whatever followed x y, so the symbol `unlocked` crashed it (str + float).  The
+    angle is the number after x y, 0 when there is none, and `unlocked` is kept after it."""
+    lib = tmp_path / "unl.pretty"; lib.mkdir()
+    (lib / "X.kicad_mod").write_text('(footprint "X" (version 20221018) (layer "F.Cu")\n'
+                                     '  (fp_text reference "REF**" (at 0 3 180 unlocked) (layer "F.SilkS") (effects (font (size 1 1) (thickness 0.15))))\n'
+                                     '  (fp_text user "o" (at 1.143 0.762 unlocked) (layer "F.SilkS") (effects (font (size 1 1) (thickness 0.15))))\n'
+                                     '  (property "Value" "v" (at 0 -3 unlocked) (layer "F.Fab") (effects (font (size 1 1) (thickness 0.15))))\n'
+                                     '  (pad "1" smd rect (at 0 0) (size 1 1.5) (layers "F.Cu" "F.Mask"))\n)\n')
+    saved = cadpcb.KICAD_FP
+    cadpcb.KICAD_FP = str(tmp_path)
+    try:
+        fp = cadpcb.kicad_footprint("unl", "X")
+    finally:
+        cadpcb.KICAD_FP = saved
+    b = cadpcb.Board(H.face_rect(20, 10), name="unl")
+    b.place(fp, "U1", (0, 0), rot=90, value="v")
+    b.place(fp, "U2", (5, 0), rot=45, value="v", layer="bottom")
+    tree = kp.parse(b.kicad_pcb())
+    u1, u2 = kp.children(tree, "footprint")[:2]
+    texts = lambda f: {(t[1], str(t[2])): kp.child(t, "at")[1:] for t in kp.children(f, "fp_text") + kp.children(f, "property")}
+    assert texts(u1)[("reference", "U1")] == [0.0, 3.0, 270.0, "unlocked"]          # 180 + 90
+    assert texts(u1)[("user", "o")] == [1.143, 0.762, 90.0, "unlocked"]              # no angle written: 0 + 90
+    assert texts(u1)[("Value", "v")] == [0.0, -3.0, 90.0, "unlocked"]
+    assert texts(u2)[("reference", "U2")] == [0.0, -3.0, 225.0, "unlocked"]          # flipped: y mirrored, -180 + 45
+    assert texts(u2)[("user", "o")] == [1.143, -0.762, 45.0, "unlocked"]
+    assert kp.child(kp.children(u1, "pad")[0], "at")[1:] == [0.0, 0.0, 90.0]
+
+
 def test_slot_drill_is_the_long_dimension(cadpcb):
     """the DSL keeps one drill number per pad: for `(drill oval a b)` that is max(a, b) (documented, lossy)"""
     fp = cadpcb.kicad_footprint("Connector_USB", "USB_Micro-B_Molex-105017-0001")

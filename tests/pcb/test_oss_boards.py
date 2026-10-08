@@ -1,6 +1,6 @@
 """3. Open-source board comparison.
 
-Eighteen open-source KiCad boards from GitHub (fixtures/oss/, provenance + licence + sha256 in fixtures/oss/SOURCES.md) are
+Twenty-seven open-source KiCad boards from GitHub (fixtures/oss/, provenance + licence + sha256 in fixtures/oss/SOURCES.md) are
 parsed with kicad_parse (footprints, placements, rotations, the net on every pad, the Edge.Cuts outline), re-expressed
 through the DSL with the same library footprints / placements / nets and no copper routing, and both boards are
 exported with kicad-cli.  gerbonara then compares, per layer:
@@ -13,7 +13,9 @@ The two .kicad_pcb netlists are compared pad by pad as well.  The per-layer diff
 The boards were picked as a stress test (parts on both sides, rotations off the 90 deg grid, slot drills, custom and
 trapezoid pads, arc / bezier / polygon outlines, cutouts, 100+ footprints from a dozen libraries, a 4-layer board; the second
 set adds a 437-footprint board, V-cut / mouse-bite / KiKit panels with duplicated references, chamfered and odd-ratio roundrect
-pads, castellations with drill offsets, 22 circular cutouts, KiCad 9 files).  What a
+pads, castellations with drill offsets, 22 circular cutouts, KiCad 9 files; the third set KiCad 5 files, blind / buried / micro
+vias on a 4- and a 6-layer board, flex stackups, teardrops and rounded tracks, net ties, keepout rule areas, a V-cut panel of
+coupons, an unrouted board, an outline that exists only inside a footprint).  What a
 board has is DETECTED from the file (`_features`) and checked against what it was picked for (BOARDS).  Where a feature is
 one the DSL cannot express yet, GAPS names the test it breaks and the board's test is a strict xfail with that reason -
 the gap list is the point; a board is never dropped for it.  Bottom-side parts take part in every comparison (the DSL
@@ -71,9 +73,29 @@ BOARDS = {
     "antmicro-m2-oculink-adapter": {"inner copper layers", "circular Edge.Cuts cutouts", "cutouts", "arc outline", "bottom-side footprints", "KiCad 9 format"},
     "glasgow-revC3": {"inner copper layers", "bottom-side footprints", "50+ footprints", "many libraries", "slot drills", "arc outline", "odd rotations",
                       "KiCad 6/7 format"},
+    # the third set (2026-10-08): KiCad 5 files, blind / buried vias, flex, teardrops, net ties, project-only libraries, a V-cut panel
+    "oxplot-fpx": {"KiCad 5 format", "slot drills", "custom pads", "bottom-side footprints", "mirrored text", "arc outline"},
+    "fomu-pvt": {"KiCad 5 format", "inner copper layers", "blind/buried vias", "micro vias", "custom pads", "bottom-side footprints", "mirrored text",
+                 "keepout rule areas", "arc outline"},
+    "advanced-linear-motor": {"6 copper layers", "inner copper layers", "blind/buried vias", "NPTH-only footprints", "KiCad 8 format"},
+    "placebo": {"rounded tracks", "teardrops", "outline only in footprint Edge.Cuts", "footprint-level Edge.Cuts", "footprints without a library prefix",
+                "bottom-side footprints", "odd rotations", "KiCad 6/7 format"},
+    "locust": {"net ties", "unrouted board", "copper graphics in footprints", "slot drills", "chamfered pads", "bottom-side footprints", "arc outline",
+               "many libraries", "KiCad 6/7 format"},
+    "adsbee-panel-saw-eval": {"V-cut panel", "duplicate references", "same reference on different nets", "keepout rule areas",
+                              "footprints only in the project's own library", "KiCad 8 format"},
+    "olimex-esp32-poe-revM2": {"inner copper layers", "bottom-side footprints", "mirrored text", "teardrops", "keepout rule areas", "slot drills",
+                               "trapezoid pads", "copper-less pads", "footprints only in the project's own library", "odd rotations", "50+ footprints",
+                               "many libraries", "KiCad 6/7 format"},
+    "neopico-hd-fpc20": {"custom pads", "offset drills", "polygon Edge.Cuts", "cutouts", "KiCad 9 format"},
+    "fly2040-cpu-flex": {"flex stackup", "polygon Edge.Cuts", "cutouts", "offset drills", "bottom-side footprints", "mirrored text", "groups",
+                         "KiCad 6/7 format"},
 }
 
-# feature the DSL cannot express -> (tests it breaks, why).  Strict: when the DSL learns it, the xfail turns into a failure here.
+# feature the DSL cannot express -> (tests it breaks, why[, bites]).  Strict: when the DSL learns it, the xfail turns into a failure
+# here.  `bites(oss)` says whether the gap reaches the comparison in this variant at all: a net gap on pads the `library` variant
+# already excuses as library drift (oxplot's MH1 against the installed one-pad MountingHole) cannot fail, so it is not xfailed there.
+_NET_GAP_BITES = lambda oss: bool(set().union(*_multi_net_keys(oss["rec"])) - set(oss["drift"]))
 GAPS = {
     # the first nine boards' gaps (bottom-side footprints, inner copper layers, bezier Edge.Cuts, circular Edge.Cuts cutouts) closed 2026-10-07
     "outline closed through footprint Edge.Cuts": (("test_outline_matches",),
@@ -84,8 +106,35 @@ GAPS = {
     "same reference on different nets": (("test_pad_flashes_match", "test_netlists_match_pad_by_pad"),
         "a KiKit panel keeps every copy's references (X1 twice ...) and prefixes its nets per copy (Board_0-GND / Board_1-GND); the DSL keys a "
         "pad's net by (ref, pad), so the two X1.2 pads can only share one net - the later `net()` call wins and the other copy's pads carry "
-        "the wrong net name (a panel of identical copies with identical net names, like mozc's, is fine)"),
+        "the wrong net name (a panel of identical copies with identical net names, like mozc's, is fine)", _NET_GAP_BITES),
+    "pads sharing a number on different nets": (("test_pad_flashes_match", "test_netlists_match_pad_by_pad"),
+        "one footprint instance has several pads with the same number on different nets (oxplot's MH1 / MH2: nine pads numbered 1, three "
+        "on GND, six on no net - a KiCad 5 file, where a hand-edited pad kept its own net; pcbnew's netlist update gives every pad of a "
+        "number the same net.  wiimote's U1: two pads numbered 4, each on its own `unconnected-(U1-NC-Pad4)` net, KiCad 8's one-net-per-"
+        "unconnected-pad).  `Board.net()` keys a net by (ref, pad number) exactly as that netlist does, so the re-expression puts one net "
+        "on every pad of the number and the flashes carry a .N attribute the original has differently or not at all", _NET_GAP_BITES),
+    "outline only in footprint Edge.Cuts": (("test_outline_matches",),
+        "the board has no Edge.Cuts item at board level at all: the whole outline is 14 fp_line items inside a locked footprint (placebo's "
+        "PlaceboConnect_Cutout), which KiCad reads as the board edge.  The DSL takes a Face and writes it at board level while the placed "
+        "footprint re-emits its own items, so the same outline would be drawn twice; the harness builds no Face (nothing to build it from) and "
+        "compares the pads / drills / netlist on a stand-in rectangle around the footprints"),
 }
+
+
+def _multi_net_keys(rec: kp.BoardRec) -> tuple:
+    """the (ref, pad number) keys whose pads carry more than one net name - split into ACROSS footprint instances (a panel's
+    copies of X1 on Board_0-GND / Board_1-GND) and WITHIN one instance (oxplot's MH1: nine pads numbered 1, three on GND and
+    six on no net).  The DSL keys a net by (ref, pad number), so neither can be re-expressed."""
+    per_instance: dict = {}                                                  # (ref, number) -> [set of nets per instance]
+    for fp in rec.footprints:
+        nets: dict = {}
+        for p in fp.pads:
+            nets.setdefault(p.number, set()).add(p.net)
+        for num, s in nets.items():
+            per_instance.setdefault((fp.ref, num), []).append(s)
+    within = {k for k, ss in per_instance.items() if any(len(s) > 1 for s in ss)}
+    across = {k for k, ss in per_instance.items() if len(ss) > 1 and len(set().union(*ss)) > 1} - within
+    return across, within
 
 
 def _features(rec: kp.BoardRec) -> set:
@@ -122,9 +171,27 @@ def _features(rec: kp.BoardRec) -> set:
     if len(libs) >= 8: f.add("many libraries")
     if any(":" not in fp.name for fp in rec.footprints): f.add("footprints without a library prefix")
     if len(set(refs)) < len(refs): f.add("duplicate references")                                        # a panel of copies
-    if any(len(set(v)) > 1 for v in rec.pad_nets().values()): f.add("same reference on different nets")
-    if rec.version < 20240000: f.add("KiCad 6/7 format")
-    if rec.version >= 20241229: f.add("KiCad 9 format")
+    across, within = _multi_net_keys(rec)
+    if across: f.add("same reference on different nets")
+    if within: f.add("pads sharing a number on different nets")
+    if not rec.edge and rec.fp_edge_items: f.add("outline only in footprint Edge.Cuts")
+    if len(rec.copper_layers) >= 6: f.add("6 copper layers")
+    if rec.blind_buried_vias(): f.add("blind/buried vias")                                              # by the layers a via spans, not its flag
+    if any(k == "micro" for k, _, _ in rec.via_spans): f.add("micro vias")
+    if rec.track_arcs: f.add("rounded tracks")
+    if rec.teardrop_zones: f.add("teardrops")
+    if rec.keepout_zones: f.add("keepout rule areas")
+    if rec.net_ties: f.add("net ties")
+    if rec.vcut_texts: f.add("V-cut panel")
+    if rec.flex: f.add("flex stackup")
+    if rec.groups: f.add("groups")
+    if rec.mirrored_texts: f.add("mirrored text")
+    if rec.fp_copper_items: f.add("copper graphics in footprints")
+    if rec.segments == 0 and not rec.vias: f.add("unrouted board")
+    if rec.version < 20200000: f.add("KiCad 5 format")                                                  # 20171130: (module ...), bare symbols
+    elif rec.version < 20240000: f.add("KiCad 6/7 format")
+    elif rec.version < 20241229: f.add("KiCad 8 format")
+    else: f.add("KiCad 9 format")
     return f
 
 
@@ -150,12 +217,14 @@ def _unpack(name: str, dest: str) -> str:
 
 
 _AT3 = re.compile(r"^(\t\t\t\(at [-\d.]+ [-\d.]+)(?: ([-\d.]+))?\)$", re.M)                       # KiCad 8+: a pad's / property's `at` on its own line
-_AT_INLINE = re.compile(r"^(\t\t\((?:pad|fp_text) .*?\(at [-\d.]+ [-\d.]+)(?: ([-\d.]+))?\)", re.M)   # KiCad 6 / 7: `(pad "1" smd rect (at x y a) ...` inline
-_STRIP = re.compile(r"^\t\t(?:\(at [-\d. ]+\)|\(path \"[^\"]*\"\)|\(sheetname \"[^\"]*\"\)|\(sheetfile \"[^\"]*\"\))\n"
-                    r"|\s*\((?:net (?:\d+ )?\"[^\"]*\"|pinfunction \"[^\"]*\"|pintype \"[^\"]*\")\)", re.M)
+_AT_INLINE = re.compile(r"^(\t\t\((?:pad|fp_text) .*?\(at [-\d.]+ [-\d.]+)(?: ([-\d.]+))?\)", re.M)   # KiCad 5 / 6 / 7: `(pad "1" smd rect (at x y a) ...` inline
+_TOK = r"(?:\"[^\"]*\"|[^\s()]+)"                                                                   # a quoted string or a bare symbol (KiCad 5 writes `(path /5F86B766)`, `(net 1 GND)`)
+_STRIP = re.compile(rf"^\t\t(?:\(at [-\d. ]+\)|\(path {_TOK}\)|\(sheetname \"[^\"]*\"\)|\(sheetfile \"[^\"]*\"\))\n"
+                    rf"|\s*\((?:net (?:\d+ )?{_TOK}|pinfunction \"[^\"]*\"|pintype \"[^\"]*\")\)", re.M)
 _INDENT = re.compile(r"^((?:  )+)", re.M)
+_FP_HEAD = re.compile(r"\n\t\((?:footprint|module) ")                                                 # `(module Lib:Name ...` is KiCad 5's spelling
 _XY = re.compile(r"\((at|start|end|mid|center|xy|offset|rect_delta) (-?[\d.]+) (-?[\d.]+)((?: -?[\d.]+)?)((?: unlocked)?)\)")
-_LAYER = re.compile(r'"([FB])\.')
+_LAYER = re.compile(r'(?<=["\s])([FB])\.(?=(?:Cu|Paste|Mask|SilkS|Fab|CrtYd|Adhes)\b)')              # quoted (KiCad 6+) or bare (KiCad 5) layer names
 _CORNER = {"top_left": "bottom_left", "bottom_left": "top_left", "top_right": "bottom_right", "bottom_right": "top_right"}
 
 
@@ -174,7 +243,7 @@ def _unflip(body: str) -> str:
             ang = " " + _fmt(-float(ang))
         return f"({m.group(1)} {m.group(2)} {_fmt(-float(m.group(3)))}{ang}{m.group(5)})"
     body = _XY.sub(xy, body)
-    body = _LAYER.sub(lambda m: '"B.' if m.group(1) == "F" else '"F.', body)
+    body = _LAYER.sub(lambda m: "B." if m.group(1) == "F" else "F.", body)
     body = re.sub(r"\((chamfer(?: \w+)+)\)", lambda m: "(" + " ".join(_CORNER.get(w, w) for w in m.group(1).split()) + ")", body)
     body = re.sub(r"\(justify mirror\)\s*", "", body)
     body = re.sub(r"\(justify ([^)]*?) mirror\)", r"(justify \1)", body)
@@ -201,18 +270,22 @@ def _footprint_library(rec: kp.BoardRec, path: str, dest: pathlib.Path, installe
     on the bottom.  KiCad 6 / 7 files indent with two spaces: normalised to tabs first.
     A board can embed two different definitions under one name (glasgow's `C_0402_1005Metric` from two library versions:
     KiCad keeps each instance's copy): every further pad geometry (`_fp_sig`) is written as `Name__v2`, `__v3` ... and the
-    instances in `rec` are renamed to match, so each is re-expressed with the footprint it was drawn with."""
+    instances in `rec` are renamed to match, so each is re-expressed with the footprint it was drawn with.
+    A KiCad 5 file's `(module Lib:Name (layer B.Cu) ...)` blocks are cut the same way and written out with the KiCad 6+ head
+    `(footprint "Name"`; the rest of the block (bare layer names, `(width w)` strokes, `(fp_text reference R1 ...)`, hex
+    `(tedit ...)`) is what KiCad 6+ still reads as its legacy footprint syntax, so it stays."""
     text = open(path).read()
-    if "\n  (footprint " in text:
+    if "\n  (footprint " in text or "\n  (module " in text:
         text = _INDENT.sub(lambda m: "\t" * (len(m.group(1)) // 2), text)
     blocks: dict = {}
     sigs: dict = {}                                                          # name -> [distinct pad signatures, file order]
     order = []
     i = 0
     while True:
-        i = text.find("\n\t(footprint ", i)
-        if i < 0:
+        m = _FP_HEAD.search(text, i)
+        if not m:
             break
+        i = m.start()
         j, depth = i + 1, 0
         while True:
             c = text[j]
@@ -257,7 +330,7 @@ def _footprint_library(rec: kp.BoardRec, path: str, dest: pathlib.Path, installe
         body = _AT_INLINE.sub(unrot, _AT3.sub(unrot, body))
         if fp.layer == "B.Cu":
             body = _unflip(body)
-        body = body.replace(f'(footprint "{fp.name}"', f'(footprint "{fname}"', 1)
+        body = re.sub(rf"^\t\((?:footprint|module) {_TOK}", f'\t(footprint "{fname}"', body, count=1)
         (d / f"{fname}.kicad_mod").write_text(body.replace("\n\t", "\n")[1:])
     return from_installed
 
@@ -296,9 +369,11 @@ def oss(request, variant, cadpcb, kicad, outdir):
     d = outdir / "oss" / f"{name}-{variant}"; d.mkdir(parents=True, exist_ok=True)
     orig = _unpack(name, str(d / "original.kicad_pcb"))
     rec = kp.read_board(orig)
-    assert rec.version >= 20211014, f"{name}: KiCad 6+ board expected, version {rec.version}"
+    assert rec.version >= 20171130, f"{name}: a KiCad 5+ board expected, version {rec.version}"
     features = _features(rec)
     libs = {H.split_name(fp.name)[0] for fp in rec.footprints}
+    if not any(os.path.isfile(H.lib_path(cadpcb, *H.split_name(fp.name))) for fp in rec.footprints):
+        features.add("footprints only in the project's own library")
     libdir = d / "footprints"
     shutil.rmtree(libdir, ignore_errors=True)                                # a re-run into the same PCB_TEST_OUT: the symlinks would already exist
     installed = _footprint_library(rec, orig, libdir, cadpcb.KICAD_FP if variant == "library" else None)
@@ -311,7 +386,7 @@ def oss(request, variant, cadpcb, kicad, outdir):
     try:
         face = H.face_from_edge_cuts(rec.edge)
     except Exception as e:                                                   # the rest of the board is still compared on a stand-in outline
-        face, face_error = H.fallback_face(rec.edge), f"{type(e).__name__}: {e}"
+        face, face_error = H.fallback_face(rec.edge, rec.footprints), f"{type(e).__name__}: {e}"
     b = H.reexpress(cadpcb, rec, name, footprint_dir=str(libdir), face=face)
     regen = H.write_pcb(b, str(d / "regenerated.kicad_pcb"))
     regen_rec = kp.read_board(regen)
@@ -335,8 +410,8 @@ def _gaps(request, oss):
     """a test the board's features put in GAPS is a strict xfail naming the feature"""
     test = request.node.originalname or request.node.name.split("[")[0]
     for feat in sorted(oss["features"]):
-        tests, why = GAPS.get(feat, ((), ""))
-        if test in tests:
+        tests, why, *bites = GAPS.get(feat, ((), ""))
+        if test in tests and (not bites or bites[0](oss)):
             request.applymarker(pytest.mark.xfail(strict=True, reason=f"{oss['name']}: {feat} - {why}"))
 
 
@@ -357,8 +432,9 @@ def test_fixture_matches_sources(oss):
 
 def test_fixture_is_what_we_think(oss):
     rec = oss["rec"]
-    assert rec.footprints and rec.edge, "no footprints / no Edge.Cuts"
-    assert rec.segments > 0, "a board with no copper routing would not exercise the exclusion"
+    assert rec.footprints and (rec.edge or rec.fp_edge_items), "no footprints / no Edge.Cuts"
+    # a board with no copper routing would not exercise the exclusion - unless it was picked as the placement-only case (locust)
+    assert rec.segments > 0 or "unrouted board" in BOARDS[oss["name"]]
     assert len(oss["board"].parts) == len(rec.footprints)
     missing = BOARDS[oss["name"]] - oss["features"]
     assert not missing, f"picked for {sorted(missing)} but the file does not have it; detected: {sorted(oss['features'])}"
@@ -469,6 +545,38 @@ def test_bottom_side_parts(oss):
         assert not unexplained, msg + f"\n  original only: {left[:5]}\n  DSL only: {right[:5]}"
         total += matched
     assert total > 0
+
+
+_CJ_LAYER = lambda k: {"F.Cu": "top", "B.Cu": "bottom"}.get(k, "inner" + k[2:-3])    # KiCad copper name -> Circuit JSON layer name
+
+
+def test_blind_buried_vias_are_refused(oss):
+    """a board whose vias do not all span the whole stack (fomu's micro / buried vias on 4 layers, the linear motor's 60
+    blind / buried vias on 6): the DSL has no such via - handed the original's vias as routed copper (`kicad_pcb(traces=...)`,
+    Circuit JSON via points with from_layer / to_layer) it must refuse with a ValueError naming the feature, not write them as
+    through vias or crash; the same board's through vias (and oxplot's `(via blind ...)` that spans F.Cu to B.Cu anyway) go in."""
+    if oss["variant"] != "embedded":
+        pytest.skip("the DSL's via check does not depend on the footprints")
+    rec = oss["rec"]
+    if not rec.vias:
+        pytest.skip("no via on this board (unrouted)")
+    bb = rec.blind_buried_vias()
+    flagged = [(k, a, c) for k, a, c in rec.via_spans if k != "through"]
+    b, net = oss["board"], next(iter(oss["board"].nets))
+    via = lambda x, y, a, c: dict(type="pcb_trace", pcb_trace_id="pcb_trace_0", source_trace_id="source_trace_0",
+                                  route=[dict(route_type="via", x=x, y=-y, from_layer=_CJ_LAYER(a), to_layer=_CJ_LAYER(c))])
+    traces = [dict(type="source_trace", source_trace_id="source_trace_0", display_name=net)]
+    if bb:
+        with pytest.raises(ValueError, match="blind / buried via"):
+            b.kicad_pcb(traces + [via(*bb[0][:2], bb[0][3], bb[0][4])])
+    outer = {rec.copper_layers[0], rec.copper_layers[-1]}
+    through = sorted(((k == "through", x, y, a, c) for (x, y, _), (k, a, c) in zip(rec.vias, rec.via_spans) if {a, c} == outer))   # a flagged one first
+    if through:
+        assert len(kp.children(kp.parse(b.kicad_pcb(traces + [via(*through[0][1:])])), "via")) == 1
+    if bb or flagged:
+        conftest.REPORT.append(f"{oss['name']}: {len(bb)} of {len(rec.vias)} vias are blind / buried / micro "
+                               f"({', '.join(sorted({f'{a}-{c}' for _, _, _, a, c in bb})) or 'none'}; written with the flags "
+                               f"{', '.join(sorted({k for k, _, _ in flagged})) or 'none'}): the DSL refuses the former by ValueError, takes the rest")
 
 
 def test_netlists_match_pad_by_pad(oss):

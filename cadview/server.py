@@ -1066,43 +1066,54 @@ async def handle_snapshot_get(request):
     if project not in request.app["store"].meta:
         raise web.HTTPNotFound(text="no such scene")
     params = {k: request.query[k][:200] for k in SNAP_PARAMS if k in request.query}
-    sid = uuid.uuid4().hex
     fut = asyncio.get_running_loop().create_future()
-    request.app["snapshots"][sid] = fut
+    # newest pages first (they run the current shell), gallery pages before
+    # scene pages, and pages that failed to answer an earlier ask last: a
+    # page whose window is occluded or whose tab Chrome has frozen stays
+    # connected but never renders (2026-10-08: two such pages were the only
+    # ones open and every snapshot took the full timeout). Ask the three
+    # best; if any of those is known-slow, ask everyone. Each page gets its
+    # own id so the PNG that comes back says which page is alive.
+    slow = request.app["snap_slow"]
+    pages = [ws for ws in request.app["websockets"] if ws not in request.app["helpers"]]
+    pages = sorted(pages[::-1], key=lambda ws: (ws in slow, ws not in request.app["renderers"]))
+    ask = pages[:3] if not any(ws in slow for ws in pages[:3]) else pages
+    asked = {}
     try:
-        ask = json.dumps({"type": "snapshot", "id": sid, "name": project, "params": params})
-        # newest pages first (they run the current shell), gallery pages
-        # before scene pages; ask a couple so one stale or busy page can't
-        # stall the agent — the first PNG back wins, the rest are dropped
-        pages = [ws for ws in request.app["websockets"] if ws not in request.app["helpers"]]
-        pages.sort(key=lambda ws: ws in request.app["renderers"], reverse=True)
-        asked = 0
-        for ws in sorted(pages[::-1], key=lambda ws: ws not in request.app["renderers"])[:3]:
+        for ws in ask:
+            sid = uuid.uuid4().hex
+            msg = json.dumps({"type": "snapshot", "id": sid, "name": project, "params": params})
             try:
-                await asyncio.wait_for(ws.send_str(ask), timeout=5)
-                asked += 1
+                await asyncio.wait_for(ws.send_str(msg), timeout=5)
             except (ConnectionError, RuntimeError, asyncio.TimeoutError):
                 continue
+            request.app["snapshots"][sid] = (fut, ws)
+            asked[sid] = ws
         if not asked:
             raise web.HTTPServiceUnavailable(
                 text="no cadview page is open to render — open the gallery (/) or any scene page in a browser once")
         try:
             png = await asyncio.wait_for(fut, timeout=SNAP_TIMEOUT)
         except asyncio.TimeoutError:
+            slow.update(asked.values())
+            log.warning("snapshot %s: none of %d pages rendered in %ds", project, len(asked), SNAP_TIMEOUT)
             raise web.HTTPGatewayTimeout(text="the open page did not render in time")
     finally:
-        request.app["snapshots"].pop(sid, None)
+        for sid in asked:
+            request.app["snapshots"].pop(sid, None)
     return web.Response(body=png, content_type="image/png", headers={"Cache-Control": "no-store"})
 
 
 async def handle_snapshot_post(request):
     _reject_cross_site(request)
-    fut = request.app["snapshots"].get(request.query.get("id", ""))
+    entry = request.app["snapshots"].get(request.query.get("id", ""))
     body = await request.read()
-    if fut is None:
+    if entry is None:
         raise web.HTTPNotFound(text="unknown or expired snapshot")
     if body[:8] != b"\x89PNG\r\n\x1a\n" or len(body) > 12_000_000:
         raise web.HTTPBadRequest(text="want a PNG")
+    fut, ws = entry
+    request.app["snap_slow"].discard(ws)       # it answered: a good page again
     if not fut.done():
         fut.set_result(body)
     return web.json_response({"ok": True})
@@ -1510,6 +1521,7 @@ async def handle_ws(request):
         request.app["revision_sockets"].discard(ws)
         request.app["renderers"].discard(ws)
         request.app["helpers"].discard(ws)
+        request.app["snap_slow"].discard(ws)
         request.app["websockets"].pop(ws, None)
         log.info("viewer %s disconnected (%d left)", peer, len(request.app["websockets"]))
     return ws
@@ -1532,7 +1544,8 @@ def make_app() -> web.Application:
     app["watchers"] = {}            # project -> watch task (default-on)
     app["dirty"] = set()            # changed while unviewed -> rebuild on open
     app["last_run"] = {}            # project -> last run event (status, tail)
-    app["snapshots"] = {}           # snapshot id -> Future[png bytes]
+    app["snapshots"] = {}           # snapshot id -> (Future[png bytes], the page asked)
+    app["snap_slow"] = set()        # pages that let a snapshot time out: asked last
     app["renderers"] = set()        # gallery sockets: snapshot requests only
     app["helpers"] = set()          # hidden-frame sockets: never asked to render
     app["queued"] = set()           # designs waiting for the build gate

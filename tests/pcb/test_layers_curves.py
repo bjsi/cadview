@@ -318,6 +318,31 @@ def test_two_layer_output_unchanged(cadpcb):
         b.trace("GND", [(0, 0), (1, 1)], "in1")
 
 
+def _routed_via(from_layer, to_layer, x=5.0, y=5.0) -> list:
+    """Circuit JSON routed copper holding one via point between two layers (what a router hands `kicad_pcb(traces=...)`)"""
+    return [dict(type="source_trace", source_trace_id="source_trace_0", display_name="GND"),
+            dict(type="pcb_trace", pcb_trace_id="pcb_trace_0", source_trace_id="source_trace_0",
+                 route=[dict(route_type="wire", x=0.0, y=0.0, width=0.3, layer="top"), dict(route_type="via", x=x, y=y, from_layer=from_layer, to_layer=to_layer),
+                        dict(route_type="wire", x=x, y=y, width=0.3, layer="bottom")])]
+
+
+def test_blind_buried_vias_are_refused(cadpcb):
+    """the DSL writes through vias only (`(layers "F.Cu" "B.Cu")`, every inner layer included): a routed via point whose
+    from_layer / to_layer is not the top <-> bottom pair - blind (top to inner1), buried (inner2 to inner3) - raises a
+    ValueError that names it, instead of being written as a through via that would short every other layer's copper there
+    or crashing on an unknown layer.  A 6-layer board, the stack the linear-motor fixture has (test_oss_boards)."""
+    b = cadpcb.Board(H.face_rect(40, 20), name="six", layers=6)
+    b.net("GND")
+    assert b.copper == ["F.Cu", "In1.Cu", "In2.Cu", "In3.Cu", "In4.Cu", "B.Cu"]
+    for a, c in (("top", "inner1"), ("inner2", "inner3"), ("inner4", "bottom"), ("top", "inner4")):
+        with pytest.raises(ValueError, match=r"blind / buried via at \(5\.0, 5\.0\) " + a + " -> " + c):
+            b.kicad_pcb(_routed_via(a, c))
+    tree = kp.parse(b.kicad_pcb(_routed_via("top", "bottom")))             # the through via is written as before
+    vias = kp.children(tree, "via")
+    assert len(vias) == 1 and [str(l) for l in kp.child(vias[0], "layers")[1:]] == ["F.Cu", "B.Cu"]
+    assert len(kp.children(kp.parse(b.kicad_pcb(_routed_via(None, None))), "via")) == 1   # a via point without layers (older routers) is a through via
+
+
 def test_four_layer_circuit_json_and_jlc(cadpcb, tmp_path):
     b = build_four_layer_board(cadpcb)
     cj = b.circuit_json()

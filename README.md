@@ -142,7 +142,7 @@ the board with its parts' STEP models as build123d geometry, so it sits in
 the enclosure while you design both. The picture is `examples/stepper_board.py`:
 John McAleely's [stepper playground](https://github.com/jhmcaleely/stepper-playground)
 (MIT) re-expressed as seventeen placements and 41 nets, written back out
-and shown. What the layer writes is proven against eighteen open-source
+and shown. What the layer writes is proven against twenty-seven open-source
 KiCad boards re-expressed through it, Gerber for Gerber (`tests/pcb`).
 `pip install cadview[pcb]`; needs KiCad's footprint, symbol and 3D
 libraries (`KICAD_FOOTPRINTS`, `KICAD_SYMBOLS`, `KICAD_3DMODELS`).

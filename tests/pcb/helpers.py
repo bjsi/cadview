@@ -91,11 +91,15 @@ def split_name(name: str) -> tuple:
     return (lib, fname) if sep else ("local", name)
 
 
-def fallback_face(items: list) -> Face:
+def fallback_face(items: list, footprints: list = ()) -> Face:
     """the bounding rectangle of the Edge.Cuts items (y-up): stands in when the outline cannot be built, so the rest of
-    a board can still be compared"""
+    a board can still be compared.  A board with no Edge.Cuts item at board level at all (placebo: its outline lives
+    inside a footprint) gets the footprint origins' bounding box with a 5 mm margin."""
     xs = [p[0] for it in items for p in it.pts]
     ys = [-p[1] for it in items for p in it.pts]
+    if not xs:
+        xs = [fp.x + d for fp in footprints for d in (-5.0, 5.0)]
+        ys = [-fp.y + d for fp in footprints for d in (-5.0, 5.0)]
     return face_rect(max(xs) - min(xs), max(ys) - min(ys), (min(xs) + max(xs)) / 2, (min(ys) + max(ys)) / 2)
 
 

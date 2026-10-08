@@ -145,10 +145,11 @@ def read_footprint(node) -> FootprintRec:
     at = child(node, "at", ["at", 0.0, 0.0])
     layer = child(node, "layer")
     props = {p[1]: p[2] for p in children(node, "property") if len(p) > 2 and isinstance(p[2], str)}
-    # KiCad 6 / 7 files carry the reference and value as `(fp_text reference "R1" ...)` instead of properties
+    # KiCad 5 / 6 / 7 files carry the reference and value as `(fp_text reference "R1" ...)` instead of properties
+    # (a KiCad 5 `(module ...)` writes them bare: `(fp_text value 1u ...)`, so a numeric value comes back as a float)
     for t in children(node, "fp_text"):
         if len(t) > 2 and t[1] in ("reference", "value"):
-            props.setdefault(str(t[1]).capitalize(), str(t[2]))
+            props.setdefault(str(t[1]).capitalize(), numstr(t[2]))
     model = child(node, "model")
     return FootprintRec(str(node[1]), [read_pad(p) for p in children(node, "pad")], at[1], at[2],
                         at[3] if len(at) > 3 else 0.0, layer[1] if layer else "F.Cu",
@@ -181,6 +182,16 @@ class BoardRec:
     fp_edge_items: int = 0          # fp_line / fp_arc / ... drawn on Edge.Cuts inside footprints (castellations, module cutouts)
     castellated: bool = False       # `(castellated_pads yes)` in the setup / stackup: pads on the board edge are meant to be cut through
     fp_copper_items: int = 0        # fp_line / fp_arc / fp_poly ... drawn on a copper layer inside footprints (they plot as lines / regions)
+    via_spans: list = field(default_factory=list)   # per via, in `vias` order: (kind, from_layer, to_layer) - kind 'through' | 'blind' | 'micro' as
+                                                    # written (`(via blind ...)` / `(via micro ...)`); the layers are what decides whether it spans the stack
+    track_arcs: int = 0             # `(arc ...)` track items on copper (rounded routing)
+    teardrop_zones: int = 0         # zones KiCad generated as teardrops (`(attr (teardrop ...))`, KiCad 7+)
+    keepout_zones: int = 0          # zones with a `(keepout ...)` rule block (rule areas)
+    net_ties: int = 0               # footprints with `(net_tie_pad_groups ...)` (KiCad 7+ net ties)
+    vcut_texts: int = 0             # `gr_text` items reading V-CUT / V_CUT / VCUT: a panel scored for breaking apart
+    flex: bool = False              # a stackup dielectric of Polyimide (a flex circuit)
+    groups: int = 0                 # `(group ...)` blocks
+    mirrored_texts: int = 0         # texts with `(justify ... mirror)`: the silkscreen of parts on the back
 
     def pad_nets(self) -> dict:
         """{(ref, pad_number): sorted list of net names} over every pad on the board (duplicate pad numbers keep one entry each)"""
@@ -190,16 +201,53 @@ class BoardRec:
                 out.setdefault((fp.ref, p.number), []).append(p.net)
         return {k: sorted(v) for k, v in out.items()}
 
+    def blind_buried_vias(self) -> list:
+        """the vias that do not span the whole stack (outer copper to outer copper), whatever flag they were written with:
+        [(x, y, drill, from_layer, to_layer)].  A `(via blind ...)` on a 2-layer board whose layers are F.Cu / B.Cu is a through via."""
+        if len(self.copper_layers) < 2:
+            return []
+        outer = {self.copper_layers[0], self.copper_layers[-1]}
+        return [(x, y, d, a, b) for (x, y, d), (_, a, b) in zip(self.vias, self.via_spans) if {a, b} != outer]
+
+
+def _legacy_arc(center, start, angle) -> tuple:
+    """a KiCad 5 arc - `(start)` is the CENTRE, `(end)` the start point, `(angle)` the sweep in degrees, positive clockwise on
+    KiCad's y-down screen (RotatePoint's sense) - as the (start, mid, end) triple KiCad 6+ stores"""
+    dx, dy = start[0] - center[0], start[1] - center[1]
+    def at(t):
+        c, s = math.cos(math.radians(t)), math.sin(math.radians(t))
+        return (center[0] + dx * c - dy * s, center[1] + dx * s + dy * c)
+    return (start, at(angle / 2), at(angle))
+
+
+def footprint_nodes(tree) -> list:
+    """the board's footprint nodes in file order: `(footprint ...)` from KiCad 6 on, `(module ...)` in a KiCad 5 file"""
+    return [n for n in tree if isinstance(n, list) and n and n[0] in ("footprint", "module")]
+
+
+def _count_mirrored(node) -> int:
+    n = 0
+    for c in node:
+        if isinstance(c, list) and c:
+            n += (c[0] == "justify" and "mirror" in c[1:]) + _count_mirrored(c)
+    return n
+
 
 def read_board(path) -> BoardRec:
+    """A .kicad_pcb from KiCad 5 (format 20171130: `(module ...)`, bare symbols, `(width w)` strokes, arcs as centre / start /
+    angle, a via's drill defaulting to the setup's `via_drill` / `uvia_drill`) up to KiCad 10."""
     with open(path) as f:
         tree = parse(f.read())
     assert tree[0] == "kicad_pcb", path
     nets = [next((str(v) for v in reversed(n[1:]) if isinstance(v, str)), "") for n in children(tree, "net")]
-    vias = []
+    setup = child(tree, "setup") or []
+    default_drill = {k: (child(setup, key) or [None, 0.0])[1] for k, key in (("through", "via_drill"), ("blind", "via_drill"), ("micro", "uvia_drill"))}
+    vias, spans = [], []
     for v in children(tree, "via"):
-        at, d = child(v, "at"), child(v, "drill")
-        vias.append((at[1], at[2], d[1] if d else 0.0))
+        kind = v[1] if len(v) > 1 and isinstance(v[1], str) and v[1] in ("blind", "micro") else "through"
+        at, d, lay = child(v, "at"), child(v, "drill"), child(v, "layers") or [None, "", ""]
+        vias.append((at[1], at[2], d[1] if d else default_drill[kind]))
+        spans.append((kind, str(lay[1]), str(lay[2])))
     edge = []
     for n in tree:
         if not (isinstance(n, list) and n and isinstance(n[0], str) and n[0].startswith("gr_")):
@@ -207,14 +255,16 @@ def read_board(path) -> BoardRec:
         lay = child(n, "layer")
         if not lay or lay[1] != "Edge.Cuts":
             continue
-        stroke = child(n, "stroke")
-        w = child(stroke, "width")[1] if stroke else 0.0
+        stroke, width = child(n, "stroke"), child(n, "width")                  # `(stroke (width w))` from KiCad 6 on; `(width w)` in KiCad 5
+        w = child(stroke, "width")[1] if stroke else (width[1] if width else 0.0)
         P = lambda k: tuple(child(n, k)[1:3])
         if n[0] == "gr_line":
             edge.append(EdgeItem("line", (P("start"), P("end")), w))
         elif n[0] == "gr_arc":
-            assert child(n, "mid"), f"{path}: KiCad 5 arc (start/end/angle) on Edge.Cuts - KiCad 6+ boards only"
-            edge.append(EdgeItem("arc", (P("start"), P("mid"), P("end")), w))
+            if child(n, "mid"):
+                edge.append(EdgeItem("arc", (P("start"), P("mid"), P("end")), w))
+            else:                                                            # KiCad 5: (start = centre) (end = start point) (angle)
+                edge.append(EdgeItem("arc", _legacy_arc(P("start"), P("end"), child(n, "angle")[1]), w))
         elif n[0] == "gr_circle":
             edge.append(EdgeItem("circle", (P("center"), P("end")), w))
         elif n[0] == "gr_rect":
@@ -223,8 +273,10 @@ def read_board(path) -> BoardRec:
             edge.append(EdgeItem("poly", tuple(tuple(pt[1:3]) for pt in child(n, "pts")[1:]), w))
         elif n[0] == "gr_curve":
             edge.append(EdgeItem("curve", tuple(tuple(pt[1:3]) for pt in child(n, "pts")[1:]), w))
-    fp_edge = fp_cu = 0
-    for f in children(tree, "footprint"):
+    fp_edge = fp_cu = ties = 0
+    fps = footprint_nodes(tree)
+    for f in fps:
+        ties += bool(child(f, "net_tie_pad_groups"))
         for g in f:
             if isinstance(g, list) and g and isinstance(g[0], str) and g[0].startswith("fp_") and g[0] != "fp_text":
                 lay = child(g, "layer")
@@ -233,11 +285,17 @@ def read_board(path) -> BoardRec:
     layers = child(tree, "layers") or []
     copper = [str(l[1]) for l in layers[1:] if isinstance(l, list) and str(l[1]).endswith(".Cu")]
     ver = child(tree, "version")
-    setup = child(tree, "setup") or []
-    cast = child(setup, "castellated_pads") or child(child(setup, "stackup") or [], "castellated_pads")   # KiCad 9 puts it in the stackup
-    return BoardRec([read_footprint(n) for n in children(tree, "footprint")], nets, edge,
-                    len(children(tree, "segment")), vias, len(children(tree, "zone")),
-                    ver[1] if ver else 0.0, copper, fp_edge, bool(cast) and cast[1] == "yes", fp_cu)
+    stackup = child(setup, "stackup") or []
+    cast = child(setup, "castellated_pads") or child(stackup, "castellated_pads")   # KiCad 9 puts it in the stackup
+    flex = any(isinstance(l, list) and l and l[0] == "layer" and (child(l, "material") or [None, ""])[1] == "Polyimide" for l in stackup[1:])
+    zones = children(tree, "zone")
+    teardrops = sum(1 for z in zones if child(child(z, "attr") or [], "teardrop"))
+    keepouts = sum(1 for z in zones if child(z, "keepout"))
+    vcut = sum(1 for t in children(tree, "gr_text") if len(t) > 1 and isinstance(t[1], str) and re.search(r"v[-_ ]?cut", t[1], re.I))
+    return BoardRec([read_footprint(n) for n in fps], nets, edge, len(children(tree, "segment")), vias, len(zones),
+                    ver[1] if ver else 0.0, copper, fp_edge, bool(cast) and cast[1] == "yes", fp_cu,
+                    via_spans=spans, track_arcs=len(children(tree, "arc")), teardrop_zones=teardrops, keepout_zones=keepouts, net_ties=ties,
+                    vcut_texts=vcut, flex=flex, groups=len(children(tree, "group")), mirrored_texts=_count_mirrored(tree))
 
 
 def pad_abs(fp: FootprintRec, p: PadRec) -> tuple:

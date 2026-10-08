@@ -1,13 +1,14 @@
 # Open-source boards used as comparison fixtures
 
-Eighteen KiCad boards fetched verbatim from GitHub at the commits below (the first two on 2026-10-07 as the original pair, the
-next seven the same day as the stress set, the last nine that evening as the scale / panel / pad-shape set), so the suite runs
-offline and the comparison is reproducible; the tests never modify them (kicad-cli works on a copy).  Boards over 1 MB are
-stored gzip-compressed (`.kicad_pcb.gz`); the sha256 is always of the upstream file as fetched (`test_fixture_matches_sources`
-checks it on the decompressed copy; every one was re-fetched from `raw.githubusercontent.com` at its commit and compared before
-being copied in).  Licences are the repositories' own: MIT / Apache-2.0 / GPL-2.0 / CERN-OHL-P-2.0 / CERN-OHL-S-2.0 / 0BSD /
-CC-BY-4.0 / CC-BY-SA-4.0 / public domain, all of which allow redistributing the design file with this attribution (the
-share-alike and GPL files are redistributed unchanged, with their source named here).
+Twenty-seven KiCad boards fetched verbatim from GitHub at the commits below (the first two on 2026-10-07 as the original pair, the
+next seven the same day as the stress set, nine that evening as the scale / panel / pad-shape set, and nine on 2026-10-08 as the
+format / via / flex / panel set), so the suite runs offline and the comparison is reproducible; the tests never modify them
+(kicad-cli works on a copy).  Boards over 1 MB are stored gzip-compressed (`.kicad_pcb.gz`); the sha256 is always of the upstream
+file as fetched (`test_fixture_matches_sources` checks it on the decompressed copy; every one was re-fetched from
+`raw.githubusercontent.com` at its commit and compared before being copied in).  Licences are the repositories' own: MIT /
+BSD-3-Clause / Apache-2.0 / GPL-2.0 / GPL-3.0 / CERN-OHL-P-2.0 / CERN-OHL-S-2.0 / 0BSD / CC-BY-4.0 / CC-BY-SA-4.0 / Unlicense /
+public domain, all of which allow redistributing the design file with this attribution (the share-alike and GPL files are
+redistributed unchanged, with their source named here).
 
 | fixture | repository | path in repo | commit | licence | sha256 of the upstream file |
 |---|---|---|---|---|---|
@@ -29,6 +30,15 @@ share-alike and GPL files are redistributed unchanged, with their source named h
 | `mumo-castellated-module.kicad_pcb` | https://github.com/kounocom/Mumo | `Mumo.kicad_pcb` | `1467871c37d08ca8a79a2acd36a26ef3afcab6bb` (main) | CERN-OHL-S-2.0 (`LICENSE.md`) | `afd0e14e429bf0184ba5ef4ce19f19d931a3cfa7e382b3ac406776065177db52` |
 | `antmicro-m2-oculink-adapter.kicad_pcb.gz` | https://github.com/antmicro/m2-oculink-adapter | `antmicro-m2-oculink-adapter-hw.kicad_pcb` | `067f60727046cd0c0db1d39c51c9396f89f48b65` (main) | Apache-2.0 (`LICENSE`) | `9a6d5edb57d075730ce6091585560d3e0d8e9666fd5e066f07831b49d09bd190` |
 | `glasgow-revC3.kicad_pcb.gz` | https://github.com/GlasgowEmbedded/glasgow | `hardware/boards/glasgow/revC3/glasgow.kicad_pcb` | `e3e4bc46b29a8ae7075dfcb027ddc6e9af984952` (main) | 0BSD or Apache-2.0 (`LICENSE-0BSD.txt`, `LICENSE-Apache-2.0.txt`) | `74ef350bc764a48f750a17e71df6bba7364e0d7fbb48d5555e94afa0b0d97c4d` |
+| `oxplot-fpx.kicad_pcb` | https://github.com/oxplot/fpx | `board/fpx.kicad_pcb` | `3d84b37751c5bb397c331c54ff978818b7e6e53b` (master) | BSD-3-Clause (`LICENSE`, (c) 2022 Mansour Behabadi) | `796204b8dbdadb398cb57d92d9f06eb95c1e5550cb7f22c33d1ee2b7b68f1759` |
+| `fomu-pvt.kicad_pcb` | https://github.com/im-tomu/fomu-hardware | `archive/pvt/pcb/tomu-fpga.kicad_pcb` | `9fdebede731c1d963335d65d25c7663cb934f925` (master) | CC-BY-SA-4.0 (`LICENSE`; `LICENSE.TAPR` alongside) - share-alike: redistributed unchanged, source named here | `f97aef8a70d8010ecf31eba9403964db468cfa227286808359524630e426a322` |
+| `advanced-linear-motor.kicad_pcb` | https://github.com/gxurma/Advanced-Linear-Motor | `Advanced Linear Motor.kicad_pcb` (a space in the name: URL-encode it) | `8470b889294581a8c642747af6b55eee568da2cc` (main) | GPL-2.0 (`LICENSE`) - redistributed unchanged, source named here | `5a0e456f44fcf07923d64dbabc4e9b41dbe119d3656fe884d71797a41faf71e7` |
+| `placebo.kicad_pcb` | https://github.com/dotcypress/placebo | `placebo.kicad_pcb` | `c5da1b37fa3adf2bd180505f552df92d45fefc87` (main) | Apache-2.0 OR MIT (`LICENSE-APACHE`, `LICENSE-MIT`) | `65ef2ba1a1c9a7a7a58db3d80259860f57b1a38e0d73f35c91b0c7c465add629` |
+| `locust.kicad_pcb` | https://github.com/hlord2000/Locust | `Locust.kicad_pcb` | `c6009d8c6927e3376ccf945290beeb022fa9800a` (main) | CERN-OHL-P-2.0 (`LICENSE`) | `5d7c798bf8e82e5a3f82b673ba9c1be93f47b2af46fff67f694fcc884b9e70d6` |
+| `adsbee-panel-saw-eval.kicad_pcb` | https://github.com/PantsForBirds/adsbee | `kicad/prototyping/panel_saw_eval_board/panel_saw_eval_board.kicad_pcb` | `fe8a150a52b2b4aba3366e756fe43cc02388c8c7` (main) | GPL-3.0 (`LICENSE`) - redistributed unchanged, source named here | `d479203aa8fc9e25d88518b8881cc0199f22bc295223bbf3446e37d619a4e451` |
+| `olimex-esp32-poe-revM2.kicad_pcb.gz` | https://github.com/OLIMEX/ESP32-POE | `HARDWARE/ESP32-PoE-hardware-revision-M2/ESP32-PoE_Rev_M2.kicad_pcb` | `deb38a377d50eadb04ddc7118a17a5ae58b1ee53` (master) | Apache-2.0 (`LICENSE`) | `7c9f634768ff4e8aee67b8f2f83d0495ab00e2f50209c5dd133a9f39e8bce9fa` |
+| `neopico-hd-fpc20.kicad_pcb` | https://github.com/fliperama86/neopico-hd | `hardware/neopico-hd/fpc-20/fpc.kicad_pcb` | `398762c9155a74d90443bf9b9fa32f4b37de3a51` (main) | Unlicense (`LICENSE`, public domain) | `c0490626c14da15f309dcb83b5b6e94f8d2e1cb1bc4f17622e83eb50c291e2f3` |
+| `fly2040-cpu-flex.kicad_pcb` | https://github.com/floxcap/fly2040 | `pcb/cpu_flex/cpu_flex.kicad_pcb` | `efd34028a29b96322d9d85ffb3281dea2220937e` (main) | MIT (`LICENSE`, (c) 2023 floxcap) | `3379fe8526fea9484599b0f5b19fb122a8cac13a9a654c105adc1994f7fb04f6` |
 
 What is on them (from `kicad_parse.read_board`; "B.Cu" = parts on the bottom side):
 
@@ -103,6 +113,47 @@ What is on them (from `kicad_parse.read_board`; "B.Cu" = parts on the bottom sid
   libraries (195 footprints installed); `Capacitor_SMD:C_0402_1005Metric` and `C_0603_1608Metric` are each embedded with two
   different pad geometries (two library versions in one board - the harness re-expresses them as `__v2`); one part at 45 deg;
   1149 pads, 4 slots, 4 NPTH; outline 4 lines + 4 arcs; 4715 segments, 416 vias, 32 zones.  Stored gzip-compressed (3.5 MB).
+- **oxplot-fpx** (a USB-PD trigger board) — **KiCad 5.1.9 file format** (20171130: `(module ...)` not `(footprint ...)`, `(page A4)`
+  / `(host pcbnew ...)` header, bare symbols, `fp_text reference` / `value` on all 36 modules, hex `(tstamp ...)` stamps, `(width w)`
+  strokes, Edge.Cuts arcs as centre / start / angle), 2 layers, 36 footprints, 19 on B.Cu (62 `(justify mirror)` texts), 9 libraries
+  (`Resistor_SMD` 9, `Capacitor_SMD` 8, the project's `fpx` 7, `TestPoint` 4, ...; `C_0603_1608Metric` embedded with two pad geometries),
+  one part at 60 deg; 164 pads of which 8 custom with `(anchor ...)` primitives (paste-only), 4 oval slots (the USB-C shell); the two
+  `MH` mounting-hole modules have nine pads each all numbered 1, three on GND and six on no net; outline 4 lines + 4 arcs; 237 segments,
+  14 vias of which one is written `(via blind ...)` but spans F.Cu to B.Cu (a through via with a stray flag), 5 zones.
+- **fomu-pvt** (Fomu, the FPGA in a USB port, PVT revision) — **KiCad 5.0.1 file format**, **4 layers** in a 0.6 mm board, 55 modules
+  (50 on B.Cu, 2 pad-less, 138 mirrored texts), every one from the project's `tomu-fpga` library (embedded variant only); 222 pads of
+  which 36 custom with anchors, 2 trapezoid, 74 copper-less (paste-only); **249 vias, none through: 196 `(via micro ...)` (29 F.Cu-In1.Cu,
+  167 In2.Cu-B.Cu) and 53 `(via blind ...)` In1.Cu-In2.Cu (buried)**, drills from the setup's `via_drill` / `uvia_drill` when a via
+  carries none; outline 89 lines + 6 KiCad 5 angle arcs; 579 segments, 24 zones, 1 keepout.
+- **advanced-linear-motor** (a planar linear-motor coil board) — KiCad 8 (20240108), **6 layers** (`F.Cu In1.Cu In2.Cu In3.Cu In4.Cu
+  B.Cu`), 10 footprints (4 `MountingHole` NPTH-only, 4 `Resistor_SMD`, 2 `Connector_JST`; all installed), 17 pads; `gr_rect` outline;
+  1080 segments (the coils on every layer), **60 vias, all blind / buried: 20 F.Cu-In1.Cu, 20 In2.Cu-In3.Cu, 20 In4.Cu-B.Cu** (kicad-cli
+  writes a drill file per span); 8 dimensions.  The path in the repository has a space in it.
+- **placebo** (dotcypress's placebo board) — KiCad 7 (20221018), 2 layers, 18 footprints (1 on B.Cu: a logo; 3 pad-less), 9 libraries,
+  2 placed without a library prefix (`LOGO`, `kibuzzard-631021FD`), one part at 8 deg; 79 pads, 3 NPTH; **no Edge.Cuts item at board
+  level: the outline is 14 `fp_line` items inside the locked footprint `placebo:PlaceboConnect_Cutout`**; 197 segments + **102 `(arc ...)`
+  track items** (rounded routing), 10 vias, 51 zones of which **50 teardrops** (`(attr (teardrop ...))`); texts positioned `(at x y unlocked)`.
+- **locust** (an nRF5340 board) — KiCad 7.99 / 8-nightly file format (20231007: `(property ...)` fields with `tstamp`), 2 layers, 42
+  footprints (3 on B.Cu) from 16 libraries (38 installed), **5 `NetTie:*` footprints with `(net_tie_pad_groups ...)`** whose pads are
+  joined by copper `fp_poly` graphics (6 copper fp items); 343 pads: 4 oval slots (USB-C), 1 chamfered, 6 NPTH, 20 copper-less, roundrect
+  ratios 0.05-0.25; outline 8 lines + 8 arcs; **unrouted: 0 segments, 0 vias, 0 zones** (placement only); 153 nets.
+- **adsbee-panel-saw-eval** (SAW-filter evaluation coupons, panelised) — KiCad 8, 2 layers, **a V-cut panel of 12 coupons** (5 `V-CUT`
+  texts; outline = 14 lines, the frame + coupon boundaries), 36 footprints all from the project's `Custom_Connector_Coaxial` (24) /
+  `Custom_Filter` (12) libraries (embedded variant only), the references `J1` / `J2` / `X1` each 12 times with KiKit-style per-copy nets
+  (`Board_0-/RF_IN` ... `Board_11-/RF_IN`); 192 pads; 48 segments, 96 vias, 24 zones of which **12 keepout rule areas** (`(keepout
+  (tracks not_allowed) ...)` around the RF paths).
+- **olimex-esp32-poe-revM2** (Olimex ESP32-PoE, revision M2) — KiCad 7 (20221018), **4 layers**, 143 footprints of which **84 on B.Cu**
+  (6 pad-less, 191 mirrored texts), every one from the 12 project `OLIMEX_*-FP` libraries (embedded variant only), one part at 135 deg;
+  603 pads: 6 oval slots, 10 trapezoid, 13 NPTH, 105 copper-less; 8-line outline; 2528 segments, 233 vias, 636 zones of which **608
+  teardrops** and 8 keepout rule areas.  Stored gzip-compressed (2.8 MB).
+- **neopico-hd-fpc20** (a 20-way FPC adapter) — KiCad 9 (20241229), 2 layers (FR4 1.51 mm core; a `Stiffener - Polyimide` note on
+  User.1), 3 footprints (`TestPoint`, `Connector_FFC-FPC` installed; the project's `Library:MVS_Color_Latches`), 77 pads of which **54
+  custom pads with `(anchor ...)` primitives and a `(drill (offset ...))` each**; Edge.Cuts = 3 `gr_rect` + 1 `gr_poly` (the rects are
+  cutouts inside the polygon); 144 segments, 8 vias, 2 zones, 54 nets.
+- **fly2040-cpu-flex** (fly2040, the CPU flex) — KiCad 7 (20221018), 2 layers on a **0.025 mm Polyimide core (a flex circuit)**, 9
+  footprints of which 5 on B.Cu (13 mirrored texts), 7 from the project's `kicad_lceda` library + 2 `Resistor_SMD` (installed); 33 pads
+  with 4 `(drill (offset ...))`; Edge.Cuts = 5 `gr_poly` (the flex outline with its tail + 4 finger slots); 12 segments, 20 vias, 4 zones,
+  2 `(group ...)` blocks.
 
 Library drift seen on 2026-10-07 with the KiCad 10.0 footprint library on the hub: the stepper board's `D_DO-41_SOD81_P10.16mm_Horizontal`
 and `CP_Radial_D4.0mm_P2.00mm` / `CP_Radial_Tantal_D4.5mm_P2.50mm` pads changed shape between the KiCad 9 library the board

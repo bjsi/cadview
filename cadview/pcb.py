@@ -20,8 +20,9 @@ and KiCad draws it; the DSL's own `Pad.w / h` - Circuit JSON, `solid()` - only s
 outline edges as KiCad's own items (lines, arcs, circles, cubic beziers - `gr_curve`; cubic splines split into their spans
 exactly, every other curve - ellipses, rational / higher-degree splines - approximated by cubic beziers within CURVE_TOL =
 1 um), rect keepouts, copper pours, hand traces + vias, silkscreen text, 2 / 4 / 6 copper
-layers (`Board(layers=4)`: In1.Cu .. in the layer table and stackup, pours and traces on `layer="In1.Cu"`, through vias), parts
-on either side; `kicad_sch()` writes a schematic (global labels per net) and `check_netlist()` proves it against the board.
+layers (`Board(layers=4)`: In1.Cu .. in the layer table and stackup, pours and traces on `layer="In1.Cu"`, through vias only - a
+routed via point that stops at an inner layer, blind or buried, is refused with a ValueError), parts on either side; `kicad_sch()`
+writes a schematic (global labels per net) and `check_netlist()` proves it against the board.
 Needs build123d; shapely for outlines (`pip install cadview[pcb]`); KiCad's footprint + 3D libraries on disk
 (KICAD_FOOTPRINTS / KICAD_3DMODELS).
 
@@ -109,6 +110,13 @@ def _kv(node, key, default=None):
 
 _FLIP_LAYER = {f"{a}.{s}": f"{b}.{s}" for a, b in (("F", "B"), ("B", "F")) for s in ("Cu", "Paste", "Mask", "SilkS", "Fab", "CrtYd", "Adhes")}
 _FLIP_CORNER = {"top_left": "bottom_left", "bottom_left": "top_left", "top_right": "bottom_right", "bottom_right": "top_right"}
+
+
+def _turn(at, angle):
+    """add `angle` to an `(at x y [a] [unlocked])` node in place: the angle is the number after x y (0 when absent), and a
+    trailing symbol - KiCad 7's `unlocked` on a footprint text's position - stays where it was"""
+    nums = [v for v in at[3:] if isinstance(v, float)]
+    at[3:] = [((nums[0] if nums else 0.0) + angle) % 360] + [v for v in at[3:] if not isinstance(v, float)]
 
 
 def _flip_tree(n):
@@ -604,10 +612,10 @@ class Board:
                 if n[0] == "fp_text" and n[1] in ("reference", "value"): n[2] = Q(p.ref if n[1] == "reference" else p.value)   # KiCad <= 7 library format
                 if n[0] in ("property", "fp_text"):                                   # text angles are absolute in the file: add the part's
                     at = _kv(n, "at")
-                    if at: at[3:] = [((at[3] if len(at) > 3 else 0.0) + a) % 360]
+                    if at: _turn(at, a)
                     if n[0] == "property" and n[1] == "Reference" and p.ref_at and at: at[1:3] = [p.ref_at[0], p.ref_at[1] if bottom else -p.ref_at[1]]
                 if n[0] == "pad":
-                    at = _kv(n, "at"); at[3:] = [((at[3] if len(at) > 3 else 0.0) + a) % 360]
+                    _turn(_kv(n, "at"), a)
                     net = pad_net.get((p.ref, str(n[1]).rstrip("0").rstrip(".") if isinstance(n[1], float) else n[1]))
                     if net: n.append(["net", float(net_id[net]), Q(net)])
                     if net == "GND" and n[2] == "thru_hole": n.append(["zone_connect", 2.0])   # solid into the pour: no starved thermals on a connector row
@@ -684,6 +692,12 @@ class Board:
                                      ["layer", Q(_cu(r0["layer"]))], ["net", nid], U()])
                 for r in pts:
                     if r.get("route_type") == "via" and "x" in r:
+                        # every via the DSL writes goes through the whole stack: a route point asking for a blind / buried span
+                        # (from_layer / to_layer not top <-> bottom) is refused rather than silently made a through via
+                        span = {r[k] for k in ("from_layer", "to_layer") if r.get(k)}       # Circuit JSON names: top / bottom / inner1 ..
+                        if span and span != {"top", "bottom"}:
+                            raise ValueError(f"blind / buried via at ({r['x']}, {r['y']}) {r.get('from_layer')} -> {r.get('to_layer')}: "
+                                             f"the DSL writes through vias only (F.Cu to B.Cu; this board has {self.layers} copper layers)")
                         root.append(["via", ["at", round(r["x"], 4), Y(round(r["y"], 4))], ["size", self.via_dims[0]], ["drill", self.via_dims[1]], ["layers", Q("F.Cu"), Q("B.Cu")], ["net", nid], U()])
         root.append(["embedded_fonts", "no"])
         return _ser(root) + "\n"
