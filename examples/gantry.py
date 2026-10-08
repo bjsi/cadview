@@ -117,31 +117,41 @@ def cables():
     through a drag chain (X) or a service loop (Y), and plug into the motors' connectors and the
     controller precisely. The router picks the path through the channels; the viewer re-solves
     the chain and the loop from the parts' live transforms every frame."""
-    from openworkshop.routing import Chain, Port, route, slots
+    from openworkshop.routing import Chain, Channel, Port, route, slots
     deck_z = BEAM_H + DECK_H                                                  # 470
     x_rail_z = deck_z + RAIL_H + LIFT + PLATE_T                               # 515.5
     xplate_top = x_rail_z + RAIL_H + LIFT + PLATE_T                           # 561
     xl = -(X_RAIL / 2 - POST / 2)                                             # -480: the left Y rail / posts
     yr = Y_RAIL / 2 - 20                                                      # 230: the rear beam / posts
-    chans = (slots("X rail", (0, 0, x_rail_z + RAIL_H / 2), (X_RAIL, RAIL_W, RAIL_H), "x")
+    rail_mid = x_rail_z + RAIL_H / 2                                          # 535.5: the X rail's mid height
+    chans = (slots("X rail", (0, 0, rail_mid), (X_RAIL, RAIL_W, RAIL_H), "x")
              + slots("Y rail left", (xl, 0, deck_z + RAIL_H / 2), (RAIL_W, Y_RAIL, RAIL_H), "y")
              + slots("post rear left", (xl, yr, BEAM_H + DECK_H / 2), (POST, BEAM_H, DECK_H), "z")
-             + slots("rear beam", (0, yr, BEAM_H / 2), (X_RAIL, BEAM_W, BEAM_H), "x"))
+             + slots("rear beam", (0, yr, BEAM_H / 2), (X_RAIL, BEAM_W, BEAM_H), "x")
+             # clips across the carriage plates: from where the motor's lead lands to the chain bracket
+             + [Channel("X carriage plate", (30, 36, xplate_top + 2), (-20, -36, xplate_top + 2), "clip"),
+                # under the Y carriage plate, starting right below the X chain's fixed end (clear of the rail)
+                Channel("Y carriage left", (xl, -44, x_rail_z - 6), (xl - 100, 0, deck_z + RAIL_H / 2), "clip")])
     box = Port("controller", (240, yr, BEAM_H + 20), (-1, 0, 0))
     # X motor: body x -560..-520 at the X rail's left end; its connector on the +Y side
     x_motor = Port("X motor", (-550, 21.2, x_rail_z), (0, 1, 0))
     # Z1 motor stands on the X carriage plate (x 0, y ~43, z 561..601); connector on its +X side
     z1_motor = Port("Z1 motor", (21.2, PLATE / 2 + RAIL_W / 2, xplate_top + 20), (1, 0, 0))
-    # the X carriage travels ±423 along the X rail: a drag chain on the rail's front side,
-    # fixed end near the left Y carriage, moving end on a bracket off the plate's front edge
-    chain = Chain("X rail", (-470, -44, x_rail_z), "X carriage plate", (-20, -44, x_rail_z + 60), axis=(1, 0, 0), r=30, length=1050)
-    # what moves together: the router may only cross between stages through the chain or a loop
+    # two drag chains, each lying flat beside its rail (the two runs side by side, 2r apart):
+    # X: fixed end on the X rail near its left end, moving end on a bracket off the carriage plate's front;
+    #    the carriage travels ±423, so the chain is 1050 long and its bend sits halfway along the travel
+    # Y: fixed end on the Y rail's outer face at the rear, moving end on the left Y carriage's bracket;
+    #    the stage travels ±173, bend lying toward the front
+    x_chain = Chain("X rail", (-470, -44, rail_mid), "X carriage plate", (-20, -104, rail_mid), axis=(1, 0, 0), r=30, length=1050)
+    y_chain = Chain("Y rail left", (xl - 40, yr, deck_z + RAIL_H / 2), "Y carriage left", (xl - 100, 0, deck_z + RAIL_H / 2),
+                    axis=(0, -1, 0), r=30, length=600)
+    # what moves together: the router may only cross between stages through a chain
     stages = {"X rail": "Y stage", "X motor": "Y stage", "Y carriage left": "Y stage",
               "X carriage plate": "X carriage", "Z1 motor": "X carriage"}
-    # the Y stage travels ±173 along the Y rails: a loop of cable hangs off the X rail's end
-    loop = {frozenset({"Y stage", "frame"}): 420}
-    return [route("X motor cable", x_motor, box, chans, d=6, bend_r=30, stages=stages, flex=loop, color=(0.1, 0.1, 0.12)),
-            route("Z1 motor cable", z1_motor, box, chans, d=6, bend_r=30, stages=stages, flex=loop, chains=[chain], color=(0.35, 0.1, 0.1))]
+    return [route("X motor cable", x_motor, box, chans, d=6, bend_r=30, stages=stages, chains=[y_chain], color=(0.1, 0.1, 0.12)),
+            # the second cable rides 7 mm above the first wherever they share a slot or the chain
+            route("Z1 motor cable", z1_motor, box, chans, d=6, bend_r=30, stages=stages, chains=[x_chain, y_chain],
+                  offset=(0, 0, 7), color=(0.35, 0.1, 0.1))]
 
 
 def build(cx=0.5, cy=0.5, cz=0.3):

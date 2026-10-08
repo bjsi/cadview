@@ -355,7 +355,7 @@ def _min_half_leg(run):
 
 
 def route(name, start, end, channels, *, d=6.0, bend_r=None, stages=None, flex=None, chains=(), jump=60.0, reach=250.0,
-          color=(0.12, 0.12, 0.14), plug=None, jump_cost=3.0, corner_cost=40.0, flex_cost=150.0):
+          color=(0.12, 0.12, 0.14), plug=None, offset=(0.0, 0.0, 0.0), jump_cost=3.0, corner_cost=40.0, flex_cost=150.0):
     """Route a cable from Port `start` to Port `end` through `channels` (and `chains`).
 
     stages = {part: stage} says which parts move together (anything unlisted is the fixed "frame");
@@ -491,6 +491,11 @@ def route(name, start, end, channels, *, d=6.0, bend_r=None, stages=None, flex=N
             continue
         out.append(p)
         out_kinds.append(k)
+    # offset: cables sharing a slot sit side by side instead of on top of each other — every
+    # waypoint but the two plugs is shifted by it (the chain ends included, so the chain shifts too)
+    off = _v(offset)
+    if any(off):
+        out = [(p, pt if i in (0, len(out) - 1) else _add(pt, off)) for i, (p, pt) in enumerate(out)]
     loops, chain_spans = {}, {}
     for i, k in enumerate(out_kinds):
         if k == "flex":

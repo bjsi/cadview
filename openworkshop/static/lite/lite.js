@@ -171,8 +171,15 @@ function buildCables(specs) {
         const mesh = new THREE.Mesh(new THREE.BufferGeometry(), mat);
         mesh.userData.id = "cable:" + spec.name;
         modelGroup.add(mesh);
-        // the swept rest-pose part the model carries under the same label steps aside
-        for (const [id, p] of partsIndex) if (id.split("/").pop() === spec.name) p.meshes.forEach((o) => { o.visible = false; });
+        // the swept rest-pose part the model carries under the same label steps aside: its meshes
+        // go dark and the live tube takes its place in the parts index, so the tray's eye, hide /
+        // only and selection all act on the tube
+        for (const [id, p] of partsIndex) if (id.split("/").pop() === spec.name) {
+            p.meshes.forEach((o) => { o.visible = false; });
+            p.meshes = [mesh];
+            mesh.userData.id = id;
+            mesh.userData.node = p.node;
+        }
         cables.push({ spec, anchors, mesh, loops, chains, routed: !!spec.waypoints });
     }
     updateCables();
