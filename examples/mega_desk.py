@@ -155,7 +155,7 @@ def assembly():
         ("legs", ["leg front left", "leg front right", "leg back left", "leg back right",
                   "foot rail left", "foot rail right"], {"view": "iso", "zoom": 1.0}),
         ("frame", ["long rail front", "long rail back", "cross rail left", "cross rail centre",
-                   "cross rail right", "bracket"], None),
+                   "cross rail right", "bracket", "bracket(2)", "bracket(3)", "bracket(4)"], None),
         ("top", ["MDF top"], None),
         ("uprights", ["upright x=-950", "upright x=+0", "upright x=+950", "pegboard left", "pegboard right"],
          {"view": "front", "zoom": 1.1}),

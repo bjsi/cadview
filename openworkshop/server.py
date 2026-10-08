@@ -1065,7 +1065,8 @@ async def handle_thumb_post(request):
 # path the gallery uses for thumbnails. The page the person is looking at is
 # never changed. No page open anywhere -> 503 with the fix.
 SNAP_TIMEOUT = int(os.environ.get("OPENWORKSHOP_SNAPSHOT_TIMEOUT", "40"))
-SNAP_PARAMS = ("view", "w", "h", "hide", "only", "focus", "zoom", "yaw", "t", "clip", "chapter", "clearance")
+SNAP_PARAMS = ("view", "w", "h", "hide", "only", "focus", "zoom", "yaw", "t", "clip", "chapter", "clearance", "ghost", "bg")
+SNAP_LISTS = ("hide", "only", "ghost")      # part lists: a build guide names dozens of parts at once
 
 
 async def handle_snapshot_get(request):
@@ -1074,7 +1075,7 @@ async def handle_snapshot_get(request):
         raise web.HTTPBadRequest(text="bad name")
     if project not in request.app["store"].meta:
         raise web.HTTPNotFound(text="no such scene")
-    params = {k: request.query[k][:200] for k in SNAP_PARAMS if k in request.query}
+    params = {k: request.query[k][:4000 if k in SNAP_LISTS else 200] for k in SNAP_PARAMS if k in request.query}
     fut = asyncio.get_running_loop().create_future()
     # newest pages first (they run the current shell), gallery pages before
     # scene pages, and pages that failed to answer an earlier ask last: a

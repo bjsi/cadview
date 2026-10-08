@@ -1,0 +1,34 @@
+{
+  "title": "Mega desk",
+  "intro": "Two people, about 40 minutes. Build it where it will stand: the finished desk does not fit through a door. Legs and rails are 3030 extrusion; every joint is a corner bracket with T-nuts, so leave all screws finger-tight until the top is on, then square it up and tighten.",
+  "steps": {
+    "legs": {
+      "note": "The two longer legs go at the BACK (they reach the back rail, which sits above the top). Foot rails join a front leg to its back leg; the slot faces inward.",
+      "fasteners": ["8 × M6×12 + T-nut (foot rails)"],
+      "tools": ["5 mm hex key"]
+    },
+    "frame": {
+      "note": "Front long rail flush with the top of the front legs; back long rail one MDF thickness higher. Cross rails sit on the front rail at the leg lines and the centre. A bracket goes inside each leg under the long rails.",
+      "fasteners": ["16 × M6×12 + T-nut (rails)", "8 × M6×12 + T-nut (brackets)"],
+      "tools": ["5 mm hex key", "square"]
+    },
+    "top": {
+      "note": "Drop the MDF on from above: it sits inside the back rail and over the front one. Centre it left-right, then tighten every bracket.",
+      "fasteners": ["6 × 4.5×30 wood screws through the cross rails"],
+      "tools": ["drill, 3 mm pilot", "PZ2 bit"]
+    },
+    "uprights": {
+      "note": "Uprights stand on the back rail at the three marks; plumb them against the wall before tightening. Pegboards hang on the uprights' front slots with the printed hooks.",
+      "fasteners": ["3 × angle bracket + 2 T-nuts each"],
+      "tools": ["5 mm hex key", "spirit level"]
+    },
+    "shelf": {
+      "note": "Hook the three shelf brackets into the uprights at the same height (count slots from the top), then lay the board on. The bins just sit on the board.",
+      "fasteners": ["3 × M6×16 + T-nut"],
+      "tools": ["5 mm hex key"]
+    },
+    "ceiling": {
+      "note": "Nothing to do: the ceiling is shown so the shelf height makes sense. The flat part clears the uprights by 20 mm."
+    }
+  }
+}

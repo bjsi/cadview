@@ -342,9 +342,16 @@ function partIds(spec) {
 async function snapshot() {
     const p = SNAP;
     try {
-        const only = partIds(p.only), hide = partIds(p.hide);
+        const only = partIds(p.only), hide = partIds(p.hide), ghost = partIds(p.ghost);
         if (only.size) setVisible([...partsIndex.keys()].filter((k) => !only.has(k)), false);
         if (hide.size) setVisible([...hide], false);
+        for (const id of ghost) {            // ghost=a,b: context parts, faint (a build guide's "already there")
+            for (const o of partsIndex.get(id)?.meshes || []) {
+                if (!o.material) continue;
+                o.material = o.material.clone();
+                o.material.transparent = true; o.material.opacity = 0.12; o.material.depthWrite = false;
+            }
+        }
         let chapterCam = null;
         if (animClips.length && (p.clip != null || p.t != null || p.chapter != null)) {
             const byName = animClips.findIndex((c) => c.name === p.clip);
@@ -369,7 +376,7 @@ async function snapshot() {
         const o = document.createElement("canvas");
         o.width = c.width; o.height = c.height;
         const g = o.getContext("2d");
-        g.fillStyle = "#1b1f27";
+        g.fillStyle = /^[0-9a-f]{6}$/i.test(p.bg || "") ? "#" + p.bg : "#1b1f27";   // bg=ffffff: a print-style shot
         g.fillRect(0, 0, o.width, o.height);
         g.drawImage(c, 0, 0);
         const blob = await new Promise((res) => o.toBlob(res, "image/png"));

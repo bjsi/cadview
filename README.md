@@ -85,6 +85,22 @@ check. Agents fetch every part's world bbox from `GET /api/parts` and
 verify tracks headlessly with `POST /api/clearance` (`examples/mega_desk.py`
 has the full clip).
 
+## Build guides
+
+```bash
+python -m openworkshop.guide mega-desk --notes examples/mega_desk_guide.json   # -> mega-desk-guide.html
+```
+
+The assembly clip's chapters are the build order, so the guide is baked
+from them: one self-contained page, a step per chapter with a picture shot
+at the end of the step (parts already in place ghosted, the new ones in
+colour, from the chapter's camera), the parts that step adds counted
+("4 × bracket"), and the notes file's text, fasteners and tools per step;
+a kit page up front lists everything. Phone-sized, big prev / next, prints
+one step per page — the mega desk's is
+[here](https://bjsi.github.io/openworkshop/mega-desk-guide.html). An
+agent that invented the sequence writes the notes too.
+
 ## With Claude Code
 
 Make the viewer the project's preview server (`.claude/launch.json`) and
