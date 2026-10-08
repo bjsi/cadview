@@ -20,6 +20,8 @@ Same call, plus:
   verifies animations headlessly
 - **Multi-scene, multi-device** — every design on one server with a
   searchable thumbnail gallery, live on desktop and phone
+- **Boards** — lay a PCB out from the CAD: KiCad project + schematic,
+  JLCPCB files, the populated board back in the assembly
 
 ## Install
 
@@ -65,7 +67,7 @@ own origin), `vis` (show/hide) and `q`; tracks on the same node add
 together, and a node carries its children — the gripper rides Z2, Z2 rides
 Z1, Z1 rides the X carriage. Clips get a dropdown; a clip's `chapters`
 (`[{"t": 4.0, "name": "feeder"}, …]`) become ticks on the scrub bar — the
-current one is named next to the time, a click jumps there, a chapter's
+current one is named above the bar, a click jumps there, a chapter's
 optional `"camera": {"focus": part, "view": …, "zoom": …}` is posed when it
 starts, and `cadview_snapshot(chapter="feeder")` shoots it; ⚠ toggles the
 animated collision check. The gif is a real lab gantry (266 parts, its source lives
@@ -109,15 +111,40 @@ any animation time — and the page the person is looking at never changes.
 
 ## Boards
 
-`cadview.pcb` lays a PCB out from the CAD: `Board(face, layers=2|4)` takes
-the outline, holes and cutouts (arcs, beziers, circles) off a build123d
-Face, `kicad_footprint()` reads KiCad's own libraries, `place()` (either
-side) / `net()` / `keepout()` / `pour()` describe the board, and out come
-a `.kicad_pcb` + schematic an agent can edit and `kicad-cli` can check and
-export (`tools/pcb/kicad_export.sh`), tscircuit Circuit JSON for its router
-(`tools/pcb/export.mjs`), JLCPCB BOM + CPL, and `solid()` — the populated
-board back in the assembly. Proven against eighteen open-source KiCad boards
-(`tests/pcb`). `pip install cadview[pcb]`.
+![a sensor board laid out from its enclosure, with KiCad's own footprints](docs/board.png)
+
+```python
+from cadview.pcb import Board, kicad_footprint
+
+b = Board(floor_face, thickness=1.6, z=8)          # outline + holes straight off a build123d Face
+b.hole_keepout(6)                                   # screw heads stay copper-free
+u1 = b.place(kicad_footprint("Package_SO", "SOIC-8_3.9x4.9mm_P1.27mm"), "U1", (0, 0),
+             value="MCP9808", lcsc="C64240", symbol=("Sensor_Temperature", "MCP9808_MSOP"))
+j1 = b.place(kicad_footprint("Connector_JST", "JST_XH_B4B-XH-A_1x04_P2.50mm_Vertical"), "J1", (-24, -14), rot=90,
+             symbol=("Connector_Generic", "Conn_01x04"))
+b.net("GND", ("U1", 4), ("J1", 1));  b.net("SDA", ("U1", 1), ("J1", 3))
+b.pour("GND", "B.Cu")
+b.write_kicad("out", "sensor")                      # .kicad_pcb + .kicad_sch + .kicad_pro + netlist
+b.write_jlc("out")                                  # bom.csv + cpl.csv for JLCPCB assembly
+show(enclosure + b.solid())                         # the populated board back in the assembly
+```
+
+`cadview.pcb` lays a PCB out from the CAD instead of a schematic-first
+tool: the outline, holes and cutouts (lines, arcs, beziers, circles) come
+off a build123d Face, footprints and symbols come from KiCad's own
+libraries on disk (no KiCad binary needed to write), parts go on either
+side of a 2- or 4-layer board with nets, pours, keepouts, hand traces and
+silkscreen, and the outputs are a `.kicad_pcb` + schematic an agent can
+edit by line and `kicad-cli` can check and export (`tools/pcb/kicad_export.sh`:
+DRC, ERC, Gerbers, drill, STEP), tscircuit Circuit JSON for its autorouter
+and exporters (`tools/pcb/export.mjs`), JLCPCB BOM + CPL, and `solid()` —
+the board with its parts' STEP models as build123d geometry, so it sits in
+the enclosure while you design both. `examples/board.py` is the picture
+above (DRC 0 errors, ERC 0 before routing). What it writes is proven
+against eighteen open-source KiCad boards re-expressed through it,
+Gerber for Gerber (`tests/pcb`). `pip install cadview[pcb]`; needs
+KiCad's footprint, symbol and 3D libraries (`KICAD_FOOTPRINTS`,
+`KICAD_SYMBOLS`, `KICAD_3DMODELS`).
 
 ## Review pages
 
