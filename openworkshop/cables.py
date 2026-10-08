@@ -1,4 +1,9 @@
-"""Cables — a cable is declared by what it connects; the viewer routes it live.
+"""Cables, the quick form — a cable declared by what it connects, drawn as a spline.
+
+For a real machine use openworkshop.routing instead: cables there run in
+extrusion slots, cross moving joints through drag chains or fixed-length
+loops, and plug into ports — this module is for a sketch, or a cable that
+really is a free span between two points.
 
     from openworkshop.cables import Cable
 

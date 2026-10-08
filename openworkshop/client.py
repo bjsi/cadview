@@ -247,8 +247,9 @@ def show(*cad_objs, names=None, colors=None, alphas=None, **kwargs):
     if cables:
         message["cables"] = [c.descriptor() if hasattr(c, "descriptor") else dict(c) for c in cables]
         for c in message["cables"]:
-            if not (c.get("name") and isinstance(c.get("anchors"), list) and len(c["anchors"]) >= 2):
-                raise ValueError("cables: each needs a name and at least two anchors (part, at, dir)")
+            pts = c.get("waypoints") if isinstance(c.get("waypoints"), list) else c.get("anchors")
+            if not (c.get("name") and isinstance(pts, list) and len(pts) >= 2):
+                raise ValueError("cables: each needs a name and at least two anchors or waypoints (part, at)")
 
     # routes: how each part type gets made — {label or glob: ["print", "cnc"]},
     # several allowed, the first is the default; the build guide's kit page

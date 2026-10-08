@@ -153,7 +153,11 @@ const CABLE_SEGMENTS = 64, CABLE_RADIAL = 10;
 function buildCables(specs) {
     for (const spec of specs) {
         const anchors = [];
-        for (const a of spec.anchors || []) {
+        // routed cables (openworkshop.routing): waypoints on parts + which spans are loops
+        const points = spec.waypoints || spec.anchors || [];
+        const loops = new Map((spec.flex || []).map((f) => [f.i, f.loop]));
+        const chains = new Map((spec.chains || []).map((ch) => [ch.i, ch]));
+        for (const a of points) {
             const g = resolveTargets(a.part)[0];
             if (!g) { console.warn("cable", spec.name, ": no part", a.part); continue; }
             // the anchor is given where it is in the rest pose: keep it in the part's own frame
@@ -169,7 +173,7 @@ function buildCables(specs) {
         modelGroup.add(mesh);
         // the swept rest-pose part the model carries under the same label steps aside
         for (const [id, p] of partsIndex) if (id.split("/").pop() === spec.name) p.meshes.forEach((o) => { o.visible = false; });
-        cables.push({ spec, anchors, mesh, plugT: null });
+        cables.push({ spec, anchors, mesh, loops, chains, routed: !!spec.waypoints });
     }
     updateCables();
 }
@@ -196,11 +200,93 @@ function cablePoints(c) {
     }
     return out;
 }
+// a cable of `length` hanging from p to q (gravity -Z): the catenary with that arc
+// length, or the straight line when taut — the same rule as routing.catenary()
+function catenaryPts(p, q, length, r = 30, n = 24) {
+    const dx = Math.hypot(q.x - p.x, q.y - p.y), dz = q.z - p.z, straight = Math.hypot(dx, dz);
+    if (length <= straight * 1.001 || straight < 1e-9) return [p, q];
+    if (dx < 2 * r) {           // (nearly) one above the other: a U, 2r wide, hanging to the length
+        const zl = Math.min((p.z + q.z + (Math.PI + 2) * r - length) / 2, Math.min(p.z, q.z) - r);
+        const cx = (p.x + q.x) / 2, cy = (p.y + q.y) / 2;
+        const pts = [p.clone(), new THREE.Vector3(cx - r, cy, p.z - r), new THREE.Vector3(cx - r, cy, zl + r)];
+        for (let i = 1; i < 6; i++) {
+            const th = Math.PI + Math.PI * i / 6;
+            pts.push(new THREE.Vector3(cx + r * Math.cos(th), cy, zl + r + r * Math.sin(th)));
+        }
+        pts.push(new THREE.Vector3(cx + r, cy, zl + r), new THREE.Vector3(cx + r, cy, q.z - r), q.clone());
+        return pts;
+    }
+    const u = new THREE.Vector3(q.x - p.x, q.y - p.y, 0).normalize();
+    const target = Math.sqrt(length * length - dz * dz);
+    let lo = dx * 1e-4, hi = dx * 1e4, a = dx;
+    for (let i = 0; i < 60; i++) { a = (lo + hi) / 2; if (2 * a * Math.sinh(dx / (2 * a)) > target) lo = a; else hi = a; }
+    const x0 = dx / 2 - a * Math.asinh(dz / (2 * a * Math.sinh(dx / (2 * a))));
+    const c0 = -a * Math.cosh(-x0 / a);
+    const out = [];
+    for (let i = 0; i <= n; i++) {
+        const x = dx * i / n, y = a * Math.cosh((x - x0) / a) + c0;
+        out.push(p.clone().addScaledVector(u, x).add(new THREE.Vector3(0, 0, y)));
+    }
+    return out;
+}
+// a drag chain between its fixed and moving ends: fixed run, 180° bend, moving run;
+// the bend sits at x_b = (L - πr + x_f + x_m) / 2 along the axis (routing.chain_points)
+function chainPts(fixed, moving, ch, n = 14) {
+    const a = new THREE.Vector3(...ch.axis).normalize(), r = ch.r;
+    const xf = fixed.dot(a), xm = moving.dot(a);
+    const xb = Math.max((ch.length - Math.PI * r + xf + xm) / 2, Math.max(xf, xm) + r * 0.05);
+    const perp = moving.clone().sub(fixed).addScaledVector(a, -(xm - xf));
+    const span = perp.length(), nrm = span > 1e-6 ? perp.clone().normalize() : new THREE.Vector3(0, 0, 1);
+    const fEnd = fixed.clone().addScaledVector(a, xb - xf), mEnd = moving.clone().addScaledVector(a, xb - xm);
+    const centre = fEnd.clone().lerp(mEnd, 0.5), rad = span / 2;
+    const pts = [fixed.clone(), fEnd];
+    for (let i = 1; i < n; i++) {
+        const th = Math.PI * i / n;
+        pts.push(centre.clone().addScaledVector(nrm, -rad * Math.cos(th)).addScaledVector(a, rad * Math.sin(th)));
+    }
+    pts.push(mEnd, moving.clone());
+    return pts;
+}
+// a routed cable: waypoints in their parts' live frames; straight runs with corners
+// rounded at bend_r, loop spans as catenaries of their fixed length, chains as chains
+function routedCurve(c) {
+    const w = c.anchors.map((a) => a.group.localToWorld(a.local.clone()));
+    const r = c.spec.bend_r, path = new THREE.CurvePath();
+    const bendy = (i) => c.loops.has(i) || c.chains.has(i);
+    let i = 0;
+    while (i < w.length - 1) {
+        if (bendy(i)) {
+            const ch = c.chains.get(i);
+            const pts = ch ? (ch.reverse ? chainPts(w[i + 1], w[i], ch).reverse() : chainPts(w[i], w[i + 1], ch))
+                           : catenaryPts(w[i], w[i + 1], c.loops.get(i), c.spec.bend_r);
+            path.add(pts.length > 2 ? new THREE.CatmullRomCurve3(pts, false, "centripetal") : new THREE.LineCurve3(pts[0], pts[1]));
+            i++;
+            continue;
+        }
+        // a straight run until the next loop / chain (or the end): fillet every inner corner
+        let j = i;
+        while (j < w.length - 1 && !bendy(j)) j++;
+        let cursor = w[i].clone();
+        for (let k = i + 1; k <= j; k++) {
+            const isCorner = k < j;
+            const cut = isCorner ? Math.min(r, cursor.distanceTo(w[k]) / 2, w[k].distanceTo(w[k + 1]) / 2) : 0;
+            const end = isCorner ? w[k].clone().addScaledVector(cursor.clone().sub(w[k]).normalize(), cut) : w[k].clone();
+            if (cursor.distanceTo(end) > 1e-6) path.add(new THREE.LineCurve3(cursor, end));
+            if (isCorner) {
+                const next = w[k].clone().addScaledVector(w[k + 1].clone().sub(w[k]).normalize(), cut);
+                path.add(new THREE.QuadraticBezierCurve3(end, w[k].clone(), next));
+                cursor = next;
+            } else cursor = end;
+        }
+        i = j;
+    }
+    return path;
+}
 function updateCables() {
     for (const c of cables) {
-        const pts = cablePoints(c);
-        const curve = new THREE.CatmullRomCurve3(pts, false, "centripetal");
-        const geo = new THREE.TubeGeometry(curve, CABLE_SEGMENTS, c.spec.d / 2, CABLE_RADIAL, false);
+        const curve = c.routed ? routedCurve(c) : new THREE.CatmullRomCurve3(cablePoints(c), false, "centripetal");
+        const segs = c.routed ? Math.min(400, Math.max(48, Math.round(curve.getLength() / 6))) : CABLE_SEGMENTS;
+        const geo = new THREE.TubeGeometry(curve, segs, c.spec.d / 2, CABLE_RADIAL, false);
         c.mesh.geometry.dispose();
         c.mesh.geometry = geo;
         // plug=<chapter>: before that chapter the cable is not there yet
@@ -771,7 +857,8 @@ function applyAnimTime(t, enterChapters = false) {
     // (re)load or a re-push never moves the person's camera
     if (current !== anim.chapterIdx) {
         anim.chapterIdx = current;
-        if (enterChapters && current !== null && anim.chapters[current].camera) poseCamera(anim.chapters[current].camera);
+        // ... and only with the camera button on: by default playback never touches the camera
+        if (enterChapters && followCam && current !== null && anim.chapters[current].camera) poseCamera(anim.chapters[current].camera);
     }
     render();
 }
@@ -786,6 +873,18 @@ let clearance = null;                  // { moving, stat, baseline, hits }
 let clearanceOn = true;                // toggleable; remembered per browser
 try { clearanceOn = localStorage.getItem("lite-clearance") !== "off"; } catch { }
 const clearBadge = document.getElementById("anim-clear");
+// chapter cameras move the person's camera only when this is on (off by
+// default: an animation playing must never yank the view they are orbiting;
+// snapshots and the hidden frames pose their own camera regardless)
+const camToggle = document.getElementById("anim-cam");
+let followCam = false;
+try { followCam = localStorage.getItem("lite-chapter-cam") === "on"; } catch { }
+camToggle.classList.toggle("off", !followCam);
+camToggle.addEventListener("click", () => {
+    followCam = !followCam;
+    camToggle.classList.toggle("off", !followCam);
+    try { localStorage.setItem("lite-chapter-cam", followCam ? "on" : "off"); } catch { }
+});
 const clearToggle = document.getElementById("anim-clear-toggle");
 const collTint = new Map();            // mesh -> original material
 
@@ -821,6 +920,7 @@ function collectClearance() {
     clearance = null;
     clearToggle.hidden = !anim;
     clearToggle.classList.toggle("off", !clearanceOn);
+    camToggle.hidden = !anim || !(anim.chapters || []).some((c) => c.camera);
     if (!anim || !clearanceOn) return;
     const moving = [], stat = [];
     const sig = new Map();

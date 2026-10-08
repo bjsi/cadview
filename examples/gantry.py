@@ -107,27 +107,45 @@ def gantry(cx=0.5, cy=0.5, cz=0.3):
     return Compound(children=rails + [stage], label="XY stage")
 
 
+def controller():
+    """The drive box on the rear beam: where every motor cable ends up."""
+    return part(Pos(300, Y_RAIL / 2 - 20, BEAM_H + 20) * Box(120, 60, 40), "controller", PLATE_C)
+
+
 def cables():
-    """Two cables declared by what they connect (rest-pose points on the parts); the viewer
-    re-routes them from the parts' live transforms, so they follow the carriage and the Z stages."""
-    from openworkshop.cables import Cable
-    xplate_top = BEAM_H + DECK_H + RAIL_H + LIFT + PLATE_T + RAIL_H + LIFT + PLATE_T       # 561
-    z1_c = xplate_top - 90 - 0.3 * 190
-    z2_plate = (0, PLATE / 2 + RAIL_W + LIFT + PLATE_T + RAIL_W + LIFT + PLATE_T, z1_c + 60 - 200 + 70)
-    return [
-        # from the left Y carriage across to the X carriage: slack hangs under the X rail
-        Cable("X carriage cable", d=8, bend_r=40, slack=1.05,
-              ends=[("Y carriage left", (-(X_RAIL / 2 - POST / 2), -20, BEAM_H + DECK_H + RAIL_H + LIFT + PLATE_T), (0, 0, 1)),
-                    ("X carriage plate", (-20, -20, xplate_top), (0, 0, 1))]),
-        # from the X carriage up and over to the Z2 carriage (rides Z1 and Z2)
-        Cable("Z cable", d=6, bend_r=25, slack=1.02,
-              ends=[("X carriage plate", (20, -20, xplate_top), (0, 0, 1)),
-                    ("Z2 carriage plate", (z2_plate[0], z2_plate[1] + 3, z2_plate[2] + 25), (0, 1, 0))]),
-    ]
+    """Motor cables ROUTED, not drawn: they run in the extrusions' slots, cross the moving joints
+    through a drag chain (X) or a service loop (Y), and plug into the motors' connectors and the
+    controller precisely. The router picks the path through the channels; the viewer re-solves
+    the chain and the loop from the parts' live transforms every frame."""
+    from openworkshop.routing import Chain, Port, route, slots
+    deck_z = BEAM_H + DECK_H                                                  # 470
+    x_rail_z = deck_z + RAIL_H + LIFT + PLATE_T                               # 515.5
+    xplate_top = x_rail_z + RAIL_H + LIFT + PLATE_T                           # 561
+    xl = -(X_RAIL / 2 - POST / 2)                                             # -480: the left Y rail / posts
+    yr = Y_RAIL / 2 - 20                                                      # 230: the rear beam / posts
+    chans = (slots("X rail", (0, 0, x_rail_z + RAIL_H / 2), (X_RAIL, RAIL_W, RAIL_H), "x")
+             + slots("Y rail left", (xl, 0, deck_z + RAIL_H / 2), (RAIL_W, Y_RAIL, RAIL_H), "y")
+             + slots("post rear left", (xl, yr, BEAM_H + DECK_H / 2), (POST, BEAM_H, DECK_H), "z")
+             + slots("rear beam", (0, yr, BEAM_H / 2), (X_RAIL, BEAM_W, BEAM_H), "x"))
+    box = Port("controller", (240, yr, BEAM_H + 20), (-1, 0, 0))
+    # X motor: body x -560..-520 at the X rail's left end; its connector on the +Y side
+    x_motor = Port("X motor", (-550, 21.2, x_rail_z), (0, 1, 0))
+    # Z1 motor stands on the X carriage plate (x 0, y ~43, z 561..601); connector on its +X side
+    z1_motor = Port("Z1 motor", (21.2, PLATE / 2 + RAIL_W / 2, xplate_top + 20), (1, 0, 0))
+    # the X carriage travels ±423 along the X rail: a drag chain on the rail's front side,
+    # fixed end near the left Y carriage, moving end on a bracket off the plate's front edge
+    chain = Chain("X rail", (-470, -44, x_rail_z), "X carriage plate", (-20, -44, x_rail_z + 60), axis=(1, 0, 0), r=30, length=1050)
+    # what moves together: the router may only cross between stages through the chain or a loop
+    stages = {"X rail": "Y stage", "X motor": "Y stage", "Y carriage left": "Y stage",
+              "X carriage plate": "X carriage", "Z1 motor": "X carriage"}
+    # the Y stage travels ±173 along the Y rails: a loop of cable hangs off the X rail's end
+    loop = {frozenset({"Y stage", "frame"}): 420}
+    return [route("X motor cable", x_motor, box, chans, d=6, bend_r=30, stages=stages, flex=loop, color=(0.1, 0.1, 0.12)),
+            route("Z1 motor cable", z1_motor, box, chans, d=6, bend_r=30, stages=stages, flex=loop, chains=[chain], color=(0.35, 0.1, 0.1))]
 
 
 def build(cx=0.5, cy=0.5, cz=0.3):
-    return Compound(children=[frame(), gantry(cx, cy, cz)] + [c.solid() for c in cables()], label="gantry")
+    return Compound(children=[frame(), controller(), gantry(cx, cy, cz)] + [c.solid() for c in cables()], label="gantry")
 
 
 # pick-and-place: the stage drives over sample C, both Z axes drop, the

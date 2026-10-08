@@ -88,22 +88,32 @@ has the full clip).
 ## Cables
 
 ```python
-from openworkshop.cables import Cable
-loom = Cable("X carriage cable", d=8, bend_r=40, slack=1.05,
-             ends=[("Y carriage left", (-480, -20, 515), (0, 0, 1)),      # part, rest-pose point, exit direction
-                   ("X carriage plate", (-20, -20, 561), (0, 0, 1))])
-show(build() + loom.solid(), cables=[loom], animation=...)
+from openworkshop.routing import Chain, Port, route, slots
+chans = slots("X rail", (0, 0, 535), (1000, 20, 40), "x") + slots("Y rail left", ...) + slots("rear beam", ...)
+chain = Chain("X rail", (-470, -44, 515), "X carriage plate", (-20, -44, 575), axis=(1, 0, 0), r=30, length=1050)
+z1 = route("Z1 motor cable", Port("Z1 motor", (21, 43, 581), (1, 0, 0)), Port("controller", (240, 230, 40), (-1, 0, 0)),
+           chans, d=6, bend_r=30, chains=[chain],
+           stages={"X rail": "Y stage", "X motor": "Y stage", "X carriage plate": "X carriage", "Z1 motor": "X carriage"},
+           flex={frozenset({"Y stage", "frame"}): 420})
+show(build() + z1.solid(), cables=[z1], animation=...)
 ```
 
-A cable is declared by what it connects: anchors on parts (where they are in
-the rest pose, with the direction the cable leaves), optional `via` clips on
-other parts, a diameter, a bend radius and slack. The viewer re-solves the
-route from the parts' live transforms every frame — a spline leaving each
-end along its direction, the slack hung as a catenary sag — so the cable
-follows the carriage it is plugged into with no track of its own, and
-`plug="wire up"` makes it appear from that chapter on. `loom.solid()` sweeps
-the rest-pose path in build123d: the real part for the exported model,
-`loom.length()` what to cut. `examples/gantry.py` carries two.
+Cables are routed, not drawn. `slots()` gives an extrusion's four slot lines
+as channels on their part, a `Port` is a connector with the direction the
+cable leaves it, and `route()` finds the cheapest path through the channels
+(length in a slot, a cost for every corner and every hop through the air).
+`stages` says which parts move together, and a cable may only cross between
+stages through a `Chain` (a drag chain: two runs and a bend that sits
+halfway along the travel, pure geometry) or a declared loop of fixed length
+(a hanging catenary) — never straight across a moving joint. The viewer
+re-solves the chain and the loops from the parts' live transforms every
+frame while the slot runs ride their parts, so the cable follows the
+carriage it is plugged into with no track of its own; `plug="wire up"` makes
+it appear from that chapter on. `z1.solid()` sweeps the rest-pose path in
+build123d (corners rounded at the bend radius): the real part for the
+exported model, `z1.length()` what to cut. `examples/gantry.py` routes its X
+and Z1 motor cables to a controller box this way. `openworkshop.cables.Cable`
+is the quick form — anchors and a spline — for a sketch.
 
 ## Build guides
 

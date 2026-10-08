@@ -171,6 +171,9 @@ live updates, without one this is still a full viewer; (3) install is a URL.
             display: flex; align-items: center; justify-content: center; }
         #anim-clear-toggle.off { opacity: 0.35; color: #8b93a3; }
         #anim-clear-toggle[hidden] { display: none; }
+        #anim-cam { border: 0; border-radius: 8px; width: 30px; height: 26px; cursor: pointer; background: transparent; color: inherit; }
+        #anim-cam.off { opacity: 0.35; color: #8b93a3; }
+        #anim-cam[hidden] { display: none; }
         #anim-rec { border: 0; border-radius: 8px; width: 30px; height: 26px; cursor: pointer;
             background: #3b4252; color: #d87070;
             display: flex; align-items: center; justify-content: center; }
@@ -220,6 +223,7 @@ live updates, without one this is still a full viewer; (3) install is a URL.
         <span id="anim-track"><input id="anim-scrub" type="range" min="0" max="1" step="0.01" value="0" /><span id="anim-ticks"></span><span id="anim-chapter"></span></span>
         <span id="anim-time">0.0s</span>
         <span id="anim-clear" hidden></span>
+        <button id="anim-cam" hidden title="chapter cameras: let playback move the camera on/off"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg></button>
         <button id="anim-clear-toggle" hidden title="collision check on/off"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg></button>
         <button id="anim-rec" title="record this clip as a video"><svg viewBox="0 0 24 24" width="14" height="14"><circle cx="12" cy="12" r="7" fill="currentColor"/></svg></button>
     </div>
