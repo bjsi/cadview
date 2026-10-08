@@ -107,8 +107,27 @@ def gantry(cx=0.5, cy=0.5, cz=0.3):
     return Compound(children=rails + [stage], label="XY stage")
 
 
+def cables():
+    """Two cables declared by what they connect (rest-pose points on the parts); the viewer
+    re-routes them from the parts' live transforms, so they follow the carriage and the Z stages."""
+    from openworkshop.cables import Cable
+    xplate_top = BEAM_H + DECK_H + RAIL_H + LIFT + PLATE_T + RAIL_H + LIFT + PLATE_T       # 561
+    z1_c = xplate_top - 90 - 0.3 * 190
+    z2_plate = (0, PLATE / 2 + RAIL_W + LIFT + PLATE_T + RAIL_W + LIFT + PLATE_T, z1_c + 60 - 200 + 70)
+    return [
+        # from the left Y carriage across to the X carriage: slack hangs under the X rail
+        Cable("X carriage cable", d=8, bend_r=40, slack=1.05,
+              ends=[("Y carriage left", (-(X_RAIL / 2 - POST / 2), -20, BEAM_H + DECK_H + RAIL_H + LIFT + PLATE_T), (0, 0, 1)),
+                    ("X carriage plate", (-20, -20, xplate_top), (0, 0, 1))]),
+        # from the X carriage up and over to the Z2 carriage (rides Z1 and Z2)
+        Cable("Z cable", d=6, bend_r=25, slack=1.02,
+              ends=[("X carriage plate", (20, -20, xplate_top), (0, 0, 1)),
+                    ("Z2 carriage plate", (z2_plate[0], z2_plate[1] + 3, z2_plate[2] + 25), (0, 1, 0))]),
+    ]
+
+
 def build(cx=0.5, cy=0.5, cz=0.3):
-    return Compound(children=[frame(), gantry(cx, cy, cz)], label="gantry")
+    return Compound(children=[frame(), gantry(cx, cy, cz)] + [c.solid() for c in cables()], label="gantry")
 
 
 # pick-and-place: the stage drives over sample C, both Z axes drop, the
@@ -139,6 +158,6 @@ CHAPTERS = [(0, "approach"), (3.0, "descend"), (3.8, "grip", {"focus": "Z2 stage
 
 if __name__ == "__main__":
     from openworkshop import show
-    show(build(), title="Gantry",
+    show(build(), title="Gantry", cables=cables(),
          animation=[{"name": "pick & place", "tracks": PICK, "chapters": CHAPTERS},
                     {"name": "jog", "tracks": JOG, "speed": 1}])

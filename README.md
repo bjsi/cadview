@@ -85,6 +85,26 @@ check. Agents fetch every part's world bbox from `GET /api/parts` and
 verify tracks headlessly with `POST /api/clearance` (`examples/mega_desk.py`
 has the full clip).
 
+## Cables
+
+```python
+from openworkshop.cables import Cable
+loom = Cable("X carriage cable", d=8, bend_r=40, slack=1.05,
+             ends=[("Y carriage left", (-480, -20, 515), (0, 0, 1)),      # part, rest-pose point, exit direction
+                   ("X carriage plate", (-20, -20, 561), (0, 0, 1))])
+show(build() + loom.solid(), cables=[loom], animation=...)
+```
+
+A cable is declared by what it connects: anchors on parts (where they are in
+the rest pose, with the direction the cable leaves), optional `via` clips on
+other parts, a diameter, a bend radius and slack. The viewer re-solves the
+route from the parts' live transforms every frame — a spline leaving each
+end along its direction, the slack hung as a catenary sag — so the cable
+follows the carriage it is plugged into with no track of its own, and
+`plug="wire up"` makes it appear from that chapter on. `loom.solid()` sweeps
+the rest-pose path in build123d: the real part for the exported model,
+`loom.length()` what to cut. `examples/gantry.py` carries two.
+
 ## Build guides
 
 ```bash

@@ -137,7 +137,78 @@ function disposeModel() {
     modelGroup.clear();
     partsIndex.clear();
     nodeGroups.clear();
+    cables.length = 0;
     stopAnimation();
+}
+
+// ---- cables: declared by their anchors on parts (openworkshop.cables.Cable);
+// the route is re-solved from the parts' CURRENT transforms every time the
+// animation moves, so a cable follows the carriage it is plugged into. Same
+// rule as Cable.points() in Python: Catmull-Rom through the anchors, each end
+// leading out along its direction by bend_r, a free span's slack hung as a
+// sag (gravity -Z). The model's own swept cable part (same label) is hidden
+// while the live tube stands in for it. ----------------------------------
+const cables = [];
+const CABLE_SEGMENTS = 64, CABLE_RADIAL = 10;
+function buildCables(specs) {
+    for (const spec of specs) {
+        const anchors = [];
+        for (const a of spec.anchors || []) {
+            const g = resolveTargets(a.part)[0];
+            if (!g) { console.warn("cable", spec.name, ": no part", a.part); continue; }
+            // the anchor is given where it is in the rest pose: keep it in the part's own frame
+            const local = g.worldToLocal(new THREE.Vector3(...a.at));
+            const inv = new THREE.Quaternion().copy(g.getWorldQuaternion(new THREE.Quaternion())).invert();
+            const dir = a.dir ? new THREE.Vector3(...a.dir).applyQuaternion(inv).normalize() : null;
+            anchors.push({ group: g, local, dir, kind: a.kind });
+        }
+        if (anchors.length < 2) continue;
+        const mat = new THREE.MeshStandardMaterial({ color: new THREE.Color(...(spec.color || [0.12, 0.12, 0.14])), metalness: 0.1, roughness: 0.8 });
+        const mesh = new THREE.Mesh(new THREE.BufferGeometry(), mat);
+        mesh.userData.id = "cable:" + spec.name;
+        modelGroup.add(mesh);
+        // the swept rest-pose part the model carries under the same label steps aside
+        for (const [id, p] of partsIndex) if (id.split("/").pop() === spec.name) p.meshes.forEach((o) => { o.visible = false; });
+        cables.push({ spec, anchors, mesh, plugT: null });
+    }
+    updateCables();
+}
+function sagDepth(span, slack) {
+    const s = span * slack;
+    return Math.sqrt(Math.max(0, (s - span) * (s + span / 2)));
+}
+function cablePoints(c) {
+    const { bend_r, slack } = c.spec;
+    const n = c.anchors.length, pts = [];
+    c.anchors.forEach((a, i) => {
+        const p = a.group.localToWorld(a.local.clone());
+        const d = a.dir ? a.dir.clone().applyQuaternion(a.group.getWorldQuaternion(new THREE.Quaternion())).normalize() : null;
+        if (i === 0 && d) pts.push(p, p.clone().addScaledVector(d, bend_r));
+        else if (i === n - 1 && d) pts.push(p.clone().addScaledVector(d, bend_r), p);
+        else pts.push(p);
+    });
+    if (!(slack > 1)) return pts;
+    const out = [pts[0]];
+    for (let i = 1; i < pts.length; i++) {
+        const a = pts[i - 1], b = pts[i], span = a.distanceTo(b), g = sagDepth(span, slack);
+        if (g > 0.5 && span > 4 * bend_r) out.push(a.clone().add(b).multiplyScalar(0.5).add(new THREE.Vector3(0, 0, -g)));
+        out.push(b);
+    }
+    return out;
+}
+function updateCables() {
+    for (const c of cables) {
+        const pts = cablePoints(c);
+        const curve = new THREE.CatmullRomCurve3(pts, false, "centripetal");
+        const geo = new THREE.TubeGeometry(curve, CABLE_SEGMENTS, c.spec.d / 2, CABLE_RADIAL, false);
+        c.mesh.geometry.dispose();
+        c.mesh.geometry = geo;
+        // plug=<chapter>: before that chapter the cable is not there yet
+        if (c.spec.plug && anim) {
+            const ch = (anim.chapters || []).find((x) => x.name === c.spec.plug);
+            c.mesh.visible = !ch || anim.t >= ch.t - 1e-6;
+        }
+    }
 }
 
 function buildModel(msg) {
@@ -226,6 +297,7 @@ function buildModel(msg) {
     };
     walk(lastShapes, modelGroup);
     modelGroup.updateMatrixWorld(true);
+    buildCables(msg.cables || []);
     setupAnimation(msg.animations ?? (msg.animation ? [{ name: "animation", ...msg.animation }] : []));
 
     const bb = lastShapes.bb;
@@ -682,6 +754,7 @@ function applyAnimTime(t, enterChapters = false) {
       }
     }
     modelGroup.updateMatrixWorld(true);
+    updateCables();
     // keep face-selection overlays glued to their (possibly moving) parts
     for (const m of selMarks.values())
         if (m.overlay && m.srcMesh) m.overlay.matrix.copy(m.srcMesh.matrixWorld);
