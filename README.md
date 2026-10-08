@@ -111,22 +111,20 @@ any animation time — and the page the person is looking at never changes.
 
 ## Boards
 
-![a sensor board laid out from its enclosure, with KiCad's own footprints](docs/board.png)
+![a real Pico board (the 12 V stepper playground, MIT) laid out again through cadview.pcb and shown with its parts' STEP models](docs/board.png)
 
 ```python
 from cadview.pcb import Board, kicad_footprint
 
-b = Board(floor_face, thickness=1.6, z=8)          # outline + holes straight off a build123d Face
-b.hole_keepout(6)                                   # screw heads stay copper-free
-u1 = b.place(kicad_footprint("Package_SO", "SOIC-8_3.9x4.9mm_P1.27mm"), "U1", (0, 0),
-             value="MCP9808", lcsc="C64240", symbol=("Sensor_Temperature", "MCP9808_MSOP"))
-j1 = b.place(kicad_footprint("Connector_JST", "JST_XH_B4B-XH-A_1x04_P2.50mm_Vertical"), "J1", (-24, -14), rot=90,
-             symbol=("Connector_Generic", "Conn_01x04"))
-b.net("GND", ("U1", 4), ("J1", 1));  b.net("SDA", ("U1", 1), ("J1", 3))
+b = Board(outline_face, thickness=1.6)               # outline + holes straight off a build123d Face
+for ref, (lib, name), at, rot, value in PARTS:        # ("U1", ("Package_TO_SOT_THT", "TO-220-3_Vertical"), (77.5, 22), 270, "LM7805")
+    b.place(kicad_footprint(lib, name), ref, at, rot=rot, value=value)
+for net, pins in NETS.items():                        # "GND": [("A1", "3"), ("C1", "2"), ...]
+    b.net(net, *pins)
 b.pour("GND", "B.Cu")
-b.write_kicad("out", "sensor")                      # .kicad_pcb + .kicad_sch + .kicad_pro + netlist
-b.write_jlc("out")                                  # bom.csv + cpl.csv for JLCPCB assembly
-show(enclosure + b.solid())                         # the populated board back in the assembly
+b.write_kicad("out", "board")                         # .kicad_pcb + .kicad_sch + .kicad_pro + netlist
+b.write_jlc("out")                                    # bom.csv + cpl.csv for JLCPCB assembly
+show(enclosure + b.solid())                           # the populated board back in the assembly
 ```
 
 `cadview.pcb` lays a PCB out from the CAD instead of a schematic-first
@@ -139,12 +137,13 @@ edit by line and `kicad-cli` can check and export (`tools/pcb/kicad_export.sh`:
 DRC, ERC, Gerbers, drill, STEP), tscircuit Circuit JSON for its autorouter
 and exporters (`tools/pcb/export.mjs`), JLCPCB BOM + CPL, and `solid()` —
 the board with its parts' STEP models as build123d geometry, so it sits in
-the enclosure while you design both. `examples/board.py` is the picture
-above (DRC 0 errors, ERC 0 before routing). What it writes is proven
-against eighteen open-source KiCad boards re-expressed through it,
-Gerber for Gerber (`tests/pcb`). `pip install cadview[pcb]`; needs
-KiCad's footprint, symbol and 3D libraries (`KICAD_FOOTPRINTS`,
-`KICAD_SYMBOLS`, `KICAD_3DMODELS`).
+the enclosure while you design both. The picture is `examples/stepper_board.py`:
+John McAleely's [stepper playground](https://github.com/jhmcaleely/stepper-playground)
+(MIT) re-expressed as seventeen placements and 41 nets, written back out
+and shown. What the layer writes is proven against eighteen open-source
+KiCad boards re-expressed through it, Gerber for Gerber (`tests/pcb`).
+`pip install cadview[pcb]`; needs KiCad's footprint, symbol and 3D
+libraries (`KICAD_FOOTPRINTS`, `KICAD_SYMBOLS`, `KICAD_3DMODELS`).
 
 ## Review pages
 

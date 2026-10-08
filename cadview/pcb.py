@@ -804,10 +804,15 @@ class Board:
         nets = [["net", ["code", Q(str(i + 1))], ["name", Q(n)]] + [["node", ["ref", Q(r)], ["pin", Q(pad)]] for r, pad in pins] for i, (n, pins) in enumerate(self.nets.items())]
         return _ser(["export", ["version", Q("E")], ["design", ["source", Q(f"{name}.py")], ["tool", Q("cadview.pcb")]], ["components"] + comps, ["nets"] + nets]) + "\n"
 
-    def write_kicad(self, outdir, name, traces=None, layout=None, pin_types=None):
-        """the KiCad project: .kicad_pcb, .kicad_sch (layout = schematic columns of refs), .kicad_pro, .net"""
+    def write_kicad(self, outdir, name, traces=None, layout=None, pin_types=None, schematic=True):
+        """the KiCad project: .kicad_pcb, .kicad_sch (layout = schematic columns of refs; schematic=False skips it, e.g. a
+        part with no library symbol), .kicad_pro, .net"""
         paths = []
-        for ext, txt in ((".kicad_pcb", self.kicad_pcb(traces)), (".kicad_sch", self.kicad_sch(name, layout, pin_types=pin_types)), (".kicad_pro", self.kicad_pro(name)), (".net", self.netlist(name))):
+        files = [(".kicad_pcb", lambda: self.kicad_pcb(traces))]
+        if schematic: files.append((".kicad_sch", lambda: self.kicad_sch(name, layout, pin_types=pin_types)))
+        files += [(".kicad_pro", lambda: self.kicad_pro(name)), (".net", lambda: self.netlist(name))]
+        for ext, make in files:
+            txt = make()
             p = os.path.join(outdir, name + ext)
             with open(p, "w") as f: f.write(txt)
             paths.append(p)
