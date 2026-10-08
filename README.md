@@ -134,8 +134,10 @@ libraries on disk (no KiCad binary needed to write), parts go on either
 side of a 2- or 4-layer board with nets, pours, keepouts, hand traces and
 silkscreen, and the outputs are a `.kicad_pcb` + schematic an agent can
 edit by line and `kicad-cli` can check and export (`tools/pcb/kicad_export.sh`:
-DRC, ERC, Gerbers, drill, STEP), tscircuit Circuit JSON for its autorouter
-and exporters (`tools/pcb/export.mjs`), JLCPCB BOM + CPL, and `solid()` —
+DRC, ERC, Gerbers, drill, STEP), autorouted either by Freerouting
+(`tools/pcb/freeroute.py board.kicad_pcb --drc`: DSN out, routed board back,
+DRC counts — the stepper board below routes clean in 8 s) or tscircuit's
+router from its Circuit JSON (`tools/pcb/export.mjs`), JLCPCB BOM + CPL, and `solid()` —
 the board with its parts' STEP models as build123d geometry, so it sits in
 the enclosure while you design both. The picture is `examples/stepper_board.py`:
 John McAleely's [stepper playground](https://github.com/jhmcaleely/stepper-playground)
