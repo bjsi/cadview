@@ -136,23 +136,33 @@ live updates, without one this is still a full viewer; (3) install is a URL.
             position: fixed; left: 50%; transform: translateX(-50%);
             bottom: calc(56px + env(safe-area-inset-bottom)); z-index: 11;
             display: flex; gap: 8px; align-items: center;
-            width: min(420px, calc(100vw - 150px));
+            width: min(640px, calc(100vw - 240px));   /* clears the gizmo bottom-left + the tray button */
             background: rgba(25, 31, 42, 0.9); backdrop-filter: blur(6px);
             border-radius: 12px; padding: 6px 12px;
         }
         #animbar[hidden] { display: none; }
+        /* phones: the full width, parked above the gizmo and the tray button */
+        @media (max-width: 599px) {
+            #animbar { width: calc(100vw - 16px); bottom: calc(118px + env(safe-area-inset-bottom)); gap: 6px; padding: 6px 8px; }
+            #anim-clip { max-width: 96px; }
+        }
         #anim-play { width: 40px; height: 34px; border: 0; border-radius: 8px;
             background: #88c0d0; color: #2e3440; cursor: pointer;
             display: flex; align-items: center; justify-content: center; }
         #anim-track { flex: 1; position: relative; display: flex; align-items: center; min-width: 0; }
         #anim-scrub { width: 100%; accent-color: #88c0d0; }
-        /* chapters: a tick per phase above the bar; hover names it, click jumps */
-        #anim-ticks { position: absolute; left: 8px; right: 8px; top: -2px; height: 8px; pointer-events: none; }
-        #anim-ticks .tick { position: absolute; top: 0; width: 2px; height: 8px; margin-left: -1px;
-            background: #ebcb8b; border-radius: 1px; cursor: pointer; pointer-events: auto; }
-        #anim-ticks .tick:hover, #anim-ticks .tick.on { background: #fff; }
-        #anim-time { font: 11px ui-monospace, monospace; color: #8b93a3; min-width: 42px; text-align: right;
-            white-space: nowrap; max-width: 150px; overflow: hidden; text-overflow: ellipsis; }
+        /* chapters: a tick per phase over the thumb's travel; hover names it, click jumps;
+           the current chapter's name floats above the bar so it never squeezes the slider */
+        #anim-ticks { position: absolute; left: 0; right: 0; top: -3px; height: 10px; pointer-events: none; }
+        #anim-ticks .tick { position: absolute; top: 0; width: 12px; height: 10px; margin-left: -6px;
+            cursor: pointer; pointer-events: auto; }
+        #anim-ticks .tick::after { content: ""; display: block; width: 2px; height: 9px; margin: 0 auto;
+            background: #ebcb8b; border-radius: 1px; }
+        #anim-ticks .tick:hover::after, #anim-ticks .tick.on::after { background: #fff; }
+        #anim-chapter { position: absolute; left: 0; bottom: calc(100% + 6px); font: 11px system-ui, sans-serif;
+            color: #ebcb8b; white-space: nowrap; pointer-events: none; }
+        #anim-time { font: 11px ui-monospace, monospace; color: #8b93a3; min-width: 42px; text-align: right; white-space: nowrap; }
+        #anim-clip { max-width: 130px; text-overflow: ellipsis; }
         #anim-clear { font: 700 12px system-ui, sans-serif; color: #ff6b6b; cursor: help;
             display: flex; align-items: center; gap: 3px; }
         #anim-clear[hidden] { display: none; }
@@ -207,7 +217,7 @@ live updates, without one this is still a full viewer; (3) install is a URL.
     <div id="animbar" hidden>
         <button id="anim-play"></button>
         <select id="anim-clip" hidden></select>
-        <span id="anim-track"><input id="anim-scrub" type="range" min="0" max="1" step="0.01" value="0" /><span id="anim-ticks"></span></span>
+        <span id="anim-track"><input id="anim-scrub" type="range" min="0" max="1" step="0.01" value="0" /><span id="anim-ticks"></span><span id="anim-chapter"></span></span>
         <span id="anim-time">0.0s</span>
         <span id="anim-clear" hidden></span>
         <button id="anim-clear-toggle" hidden title="collision check on/off"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg></button>

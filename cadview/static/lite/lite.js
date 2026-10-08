@@ -545,6 +545,7 @@ const animBar = document.getElementById("animbar");
 const playBtn = document.getElementById("anim-play");
 const scrub = document.getElementById("anim-scrub");
 const ticks = document.getElementById("anim-ticks");
+const chapterLabel = document.getElementById("anim-chapter");
 const timeLabel = document.getElementById("anim-time");
 const clipSel = document.getElementById("anim-clip");
 let anim = null, animRAF = 0, animPrev = 0;
@@ -615,9 +616,10 @@ function loadClip(index) {
     for (const ch of anim.chapters) {
         const el = document.createElement("span");
         el.className = "tick";
-        el.style.left = (100 * Math.min(1, Math.max(0, ch.t / duration))) + "%";
+        // over the thumb's travel: a 16 px thumb never reaches the track's ends
+        el.style.left = `calc(8px + (100% - 16px) * ${Math.min(1, Math.max(0, ch.t / duration))})`;
         el.title = `${ch.name} · ${(+ch.t).toFixed(1)}s`;
-        el.addEventListener("click", (e) => { e.stopPropagation(); applyAnimTime(ch.t); });
+        el.addEventListener("click", (e) => { e.stopPropagation(); applyAnimTime(ch.t, true); });
         ticks.append(el);
     }
     clipSel.value = index;
@@ -644,7 +646,7 @@ function sampleTrack(times, values, t) {
     return a + (b - a) * f;
 }
 
-function applyAnimTime(t) {
+function applyAnimTime(t, enterChapters = false) {
     if (!anim) return;
     anim.t = t;
     // tracks COMPOSE: reset every animated node to its base transform, then
@@ -681,14 +683,15 @@ function applyAnimTime(t) {
     scrub.value = t;
     let current = null;
     anim.chapters.forEach((ch, i) => { if (ch.t <= t + 1e-6) current = i; });
-    timeLabel.textContent = t.toFixed(1) + "s" + (current !== null ? " · " + anim.chapters[current].name : "");
-    timeLabel.title = current !== null ? anim.chapters[current].name : "";
+    timeLabel.textContent = t.toFixed(1) + "s";
+    chapterLabel.textContent = current !== null ? anim.chapters[current].name : "";
     ticks.querySelectorAll(".tick").forEach((el, i) => el.classList.toggle("on", i === current));
-    // a chapter can bring its own camera (focus / view / zoom / yaw): applied
-    // when the chapter is entered — play, scrub or tick — never while inside it
+    // a chapter can bring its own camera (focus / view / zoom / yaw): posed only
+    // when playback or a tick click ENTERS the chapter — a scrub drag, a clip
+    // (re)load or a re-push never moves the person's camera
     if (current !== anim.chapterIdx) {
         anim.chapterIdx = current;
-        if (current !== null && anim.chapters[current].camera) poseCamera(anim.chapters[current].camera);
+        if (enterChapters && current !== null && anim.chapters[current].camera) poseCamera(anim.chapters[current].camera);
     }
     render();
 }
@@ -829,7 +832,7 @@ function animStep(now) {
     if (!anim?.playing) return;
     const dt = ((now - animPrev) / 1000) * anim.speed;
     animPrev = now;
-    applyAnimTime((anim.t + dt) % anim.duration);
+    applyAnimTime((anim.t + dt) % anim.duration, true);
     animRAF = requestAnimationFrame(animStep);
 }
 
