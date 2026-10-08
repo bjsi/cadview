@@ -44,7 +44,8 @@ library on disk (`KICAD_FOOTPRINTS`, default `/usr/share/kicad/footprints`), and
 Without a runnable `kicad-cli` the tests that need it are **skipped** (shown in the `-ra` summary), not passed.  Every
 kicad-cli call runs under `nice -n 10`, one at a time (~220 calls, 3-5 min on the hub; 530 passed / 118 skipped / 16 xfailed
 on 2026-10-08 with kicad-cli 10.0.6 - the skips are the `library` variant of the eight boards whose footprints exist only in
-their own project library, and the checks a board has nothing for, e.g. no bottom-side part).
+their own project library (8 tests x 8 boards), the `library` variant of `test_blind_buried_vias_are_refused` (19, it owes nothing
+to the footprints), and the checks a board has nothing for: no bottom-side part (13), no via (3), a bottom part with no copper (3)).
 
 ## What each test proves
 
@@ -116,21 +117,21 @@ DSL does the flip itself.  A circular inner wire of the Face came from a `gr_cir
 | antmicro-usb-c-power-adapter | 9 | **4** | 124 (46) | 1 | trapezoid pads, 34 zones, 4 um Edge.Cuts step, project-only library | embedded only: pass (`layers=4`; 133 + 4 bottom-side flashes) |
 | crkbd-corne-cherry-hotswap | 7 format | 2 | 180 (168) | 12 | 100 bezier edges, 12 circle cutouts, 184 footprint-level Edge.Cuts, 113.88 deg keys, 44 slots | pass: pads (648 + 50 bottom-side flashes), 286 NPTH + 58 PTH, netlist, outline (the 100 beziers as `gr_curve`, 5192 Gerber segments, + the 12 `gr_circle` cutouts) |
 | hackrf-one | 6 format | **4** | **437** (0) | 3 | the volume case: 1639 pads, ±45 / ±135 deg, 14 arcs, user-named copper layers, 19 footprints without a library prefix, mask-only pads, hex `tedit` stamps | embedded only: pass (1616 + 305 flashes, 297 PTH, 1369 netlist keys; two DSL fixes came out of it, below) |
-| mozc-doublesided-main-panel | 8 | **4** | 234 (189) | 6 | a V-cut panel of 9 copies: every reference 9 times, 216 slots, 396 NPTH, 189 bottom parts | pass (297 + 855 flashes of which 207 + 765 bottom-side; library: 7 drift pads x 9 copies) |
+| mozc-doublesided-main-panel | 8 | **4** | 234 (189) | 6 | a V-cut panel of 9 copies: every reference 9 times, 396 NPTH of which 216 oval NPTH slots, 189 bottom parts | pass (297 + 855 flashes of which 207 + 765 bottom-side; library: 7 drift pads x 9 copies) |
 | aykevl-earring-rgb36-v3 | 9 | 2 | 63 (5) | 5 | 4 beziers + 4 arcs, 50 distinct rotations, outline closed by the hanger footprint's Edge.Cuts | pads / drills / netlist pass (217 + 11 flashes); **outline: gap** (below) - `test_outline_matches` fails before comparing anything, so its 4 beziers + 4 arcs are not compared at all |
 | jumperless-probe | 8 | 2 | 18 (0) | 1 | 80 custom + 10 chamfered + 311 odd-ratio roundrect pads, 80 footprint-level Edge.Cuts, copper graphics in footprints, two 58 mm flat arcs | embedded only: pass (415 + 341 flashes, 338 PTH, 93 Edge.Cuts items; the flat arcs exposed the 4-decimal rounding, fixed below) |
 | toraneko-mk3-panel | 9 | 2 | 21 (6) | 4 | `gr_rect` frame + 9 `gr_poly` cutouts (28-123 vertices) + 1 `gr_circle`, mouse bites as a 48-NPTH footprint | pass (428 Edge.Cuts items, 54 NPTH, 96 + 36 flashes; library: 12 drift pads) |
-| wiimote-ir-sensor-kikit-panel | 9 | 2 | 92 (12) | 8 | KiKit 2-up: 64 `NPTH-0.5mm` mouse-bite footprints (`REF**`), 6 tooling holes, the same references twice with per-copy net names | outline / drills / bottom-side parts pass (46 Edge.Cuts, 70 NPTH); the 46 + 52 flashes match geometrically but `test_pad_flashes_match` is xfailed as a whole (its last assertion, the `.N` net attribute, is the gap), so only the report line says so, not a passing test; **net names: gap** (below) |
+| wiimote-ir-sensor-kikit-panel | 9 | 2 | 92 (12) | 8 | KiKit 2-up: 64 `NPTH-0.5mm` mouse-bite footprints (`REF**`), 6 tooling holes, the same references twice with per-copy net names | outline / drills / bottom-side parts pass (46 Edge.Cuts, 70 NPTH); the 46 + 52 flashes match geometrically but `test_pad_flashes_match` is xfailed as a whole in both variants (its last assertion, the `.N` net attribute, is the gap), so only the report line says so, not a passing test - which also leaves its 4 custom pads (JP1) asserted by no test; **net names: gap** (below) |
 | mumo-castellated-module | 9 | **4** | 25 (1) | 2 | `(castellated_pads yes)`, 26 oval edge pads with 12 drill offsets, 2 custom pads, a pad-less logo on B.Cu | embedded only: pass (99 + 25 flashes, 25 PTH; the bottom-side check skips - the logo has nothing to flash) |
 | antmicro-m2-oculink-adapter | 9 | **4** | 25 (10) | 1 | 22 `gr_circle` cutouts + 17 lines + 4 arcs on Edge.Cuts, project-only library | embedded only: pass (65 Edge.Cuts items incl. the 22 circles, 97 + 53 flashes, 20 bottom-side) |
 | glasgow-revC3 | 7 format | **4** | 272 (94) | 14 | 1149 pads, 94 bottom parts, 45 deg, two footprint names each embedded with two pad geometries | pass (965 + 321 flashes, 169 bottom-side, 149 PTH + 4 NPTH, 1075 netlist keys; library: 557 drift pads, the KiCad 7 0402 / 0603 / 0805 libraries vs 10.0) |
-| oxplot-fpx | **5 format** | 2 | 36 (19) | 9 | the KiCad 5 case: `(module ...)`, `fp_text` everywhere, bare symbols, `(width)` strokes, centre / angle arcs; 4 USB-C slots, 8 custom pads with anchors, 62 mirrored texts, 60 deg, a stray `(via blind ...)` spanning F.Cu-B.Cu | outline (the 4 legacy arcs), drills (24 PTH), pads (80 + 100 flashes, 76 bottom-side), bottom parts pass; **nets: gap** (below) - MH1 / MH2 have nine pads numbered 1 on two nets, so `test_pad_flashes_match` / `test_netlists_match_pad_by_pad` xfail in the embedded variant (139 keys, 2 differ) and pass in the library variant, where those pads are drift (the installed MountingHole has one pad) |
-| fomu-pvt | **5 format** | **4** | 55 (50) | 1 | 196 micro + 53 buried vias (no through via at all), 36 custom pads with anchors, 74 paste-only pads, 138 mirrored texts, 6 legacy arcs, a keepout | embedded only: pass (95 Edge.Cuts items, 12 + 136 flashes all bottom-side, 172 netlist keys; 0 PTH - every hole is a via); `test_blind_buried_vias_are_refused`: all 249 vias refused |
-| advanced-linear-motor | 8 | **6** | 10 (0) | 3 | **six copper layers** through kicad-cli (`Board(layers=6)`: In3.Cu / In4.Cu ids 8 / 10, five dielectrics), 60 vias all blind / buried (F-In1, In2-In3, In4-B), 4 NPTH mounting holes | pass (`test_layer_stack` on 6 layers, 4 Edge.Cuts, 5 PTH + 4 NPTH, 13 + 5 flashes, 17 keys); `test_blind_buried_vias_are_refused`: all 60 refused by ValueError; library: 0 drift |
+| oxplot-fpx | **5 format** | 2 | 36 (19) | 9 | the KiCad 5 case: `(module ...)`, `fp_text` everywhere, bare symbols, `(width)` strokes, centre / angle arcs; 4 USB-C slots, 8 custom pads with anchors, 62 mirrored texts, 60 deg, a stray `(via blind ...)` spanning F.Cu-B.Cu | outline (the 4 legacy arcs), drills (24 PTH), bottom parts (76 flashes) pass in both variants; **nets: gap** (below) - MH1 / MH2 have nine pads numbered 1 on two nets, so `test_pad_flashes_match` / `test_netlists_match_pad_by_pad` xfail in the embedded variant (the 80 + 100 flashes match per the report line, 139 keys / 2 differ) and pass in the library variant, where those pads are drift (the installed MountingHole has one pad; 92 drift pads in all, 16 + 14 of them in the Gerbers).  The 8 custom pads with anchors are U3's (`Package_DFN_QFN:VQFN-20`), a drifted footprint, so no passing test asserts them - a KiCad 5 custom pad is proven by fomu's 36 only |
+| fomu-pvt | **5 format** | **4** | 55 (50) | 1 | 196 micro + 53 buried vias (no through via at all), 36 custom pads with anchors, 74 paste-only pads, 138 mirrored texts, 6 legacy arcs, a keepout | embedded only: pass (95 Edge.Cuts items, 12 + 136 flashes of which the 136 bottom-side, 172 netlist keys; 0 PTH - every hole is a via); `test_blind_buried_vias_are_refused`: the oracle classes all 249 as micro / buried, the first of them handed to the DSL is refused (no through via to write) |
+| advanced-linear-motor | 8 | **6** | 10 (0) | 3 | **six copper layers** through kicad-cli (`Board(layers=6)`: In3.Cu / In4.Cu ids 8 / 10, five dielectrics), 60 vias all blind / buried (F-In1, In2-In3, In4-B), 4 NPTH mounting holes | pass (`test_layer_stack` on 6 layers, 4 Edge.Cuts, 5 PTH + 4 NPTH, 13 + 5 flashes, 17 keys); `test_blind_buried_vias_are_refused`: the oracle classes all 60 as blind / buried, the first of them handed to the DSL is refused by ValueError; library: 8 pads differ from the installed library by the oracle's comparison, none of them in the Gerbers |
 | placebo | 7 format | 2 | 18 (1) | 9 | 102 rounded tracks (`(arc ...)` on copper), 50 teardrop zones, `unlocked` text positions, 2 footprints without a library prefix, 8 deg; **no board-level Edge.Cuts** - the outline is 14 `fp_line` items in a locked footprint | drills (24 PTH + 3 NPTH), pads (76 + 24 flashes, the arcs / teardrops excluded and counted), netlist (77 keys) pass on a stand-in rectangle; **outline: gap** (below); library: 45 drift pads |
-| locust | 7.99 format | 2 | 42 (3) | 16 | 5 `NetTie` footprints with `net_tie_pad_groups` (pads on different nets joined by copper `fp_poly`), **unrouted** (0 segments / vias), 4 slots, 1 chamfered pad, 20 mask-only pads | pass (16 Edge.Cuts, 43 PTH + 6 NPTH, 307 + 53 flashes, 282 netlist keys - each net-tie pad keeps its own net; library: 58 drift pads) |
-| adsbee-panel-saw-eval | 8 | 2 | 36 (0) | 2 | a V-cut panel of 12 coupons (`V-CUT` texts), J1 / J2 / X1 twelve times with per-copy nets, 12 keepout rule areas, project-only libraries | embedded only: outline (14 lines), pads (144 + 48 flashes) pass; **net names: gap** (the KiKit row below), as wiimote |
-| olimex-esp32-poe-revM2 | 7 format | **4** | 143 (84) | 12 | heavy B.Cu (84 parts, 191 mirrored texts), 608 teardrop zones + 8 keepouts, 10 trapezoid + 105 mask-only pads, 6 slots, 13 NPTH, 135 deg, project-only libraries | embedded only: pass (8 Edge.Cuts, 62 PTH + 13 NPTH, 239 + 308 flashes of which 30 + 276 bottom-side, 452 netlist keys; the 636 zones excluded and counted) |
+| locust | 7.99 format | 2 | 42 (3) | 16 | 5 `NetTie` footprints with `net_tie_pad_groups` (pads on different nets joined by copper `fp_poly`), **unrouted** (0 segments / vias), 4 slots, 1 chamfered pad, 20 mask-only pads | pass (16 Edge.Cuts, 43 PTH + 6 NPTH, 307 + 53 flashes, 282 netlist keys - each net-tie pad keeps its own net; the DSL re-emits the 5 footprints' `net_tie_pad_groups` with their tree, seen in the regenerated board but asserted by nothing; library: 143 drift pads, 58 + 4 of them in the Gerbers and 26 drill differences at them) |
+| adsbee-panel-saw-eval | 8 | 2 | 36 (0) | 2 | a V-cut panel of 12 coupons (`V-CUT` texts), J1 / J2 / X1 twelve times with per-copy nets, 12 keepout rule areas, project-only libraries | embedded only: outline (14 lines) passes; **net names: gap** (the KiKit row below), as wiimote - `test_pad_flashes_match` is xfailed as a whole, so its 144 + 48 flashes match only per the report line and no passing test asserts the coupons' pads; netlist: 10 (ref, pad) keys, every one differs |
+| olimex-esp32-poe-revM2 | 7 format | **4** | 143 (84) | 12 | heavy B.Cu (84 parts, 191 mirrored texts), 608 teardrop zones + 8 keepouts, 10 trapezoid + 105 mask-only pads, 6 slots, 13 NPTH, 135 deg, project-only libraries | embedded only: pass (8 Edge.Cuts, 62 PTH + 13 NPTH, 239 + 308 flashes of which 30 + 276 bottom-side, 452 netlist keys; the zones excluded as 287 + 328 Gerber regions) |
 | neopico-hd-fpc20 | 9 | 2 | 3 (0) | 3 | 54 custom pads with `(anchor ...)` primitives AND a `(drill (offset ...))` each, Edge.Cuts = 3 `gr_rect` cutouts inside a `gr_poly` | pass (24 Edge.Cuts items, 54 PTH, 77 + 54 flashes, 76 keys; library: 0 drift) |
 | fly2040-cpu-flex | 7 format | 2 | 9 (5) | 2 | a flex circuit (0.025 mm Polyimide core), outline = 5 `gr_poly` (tail + 4 finger slots), 4 drill offsets, 2 groups, 5 bottom parts | pass (32 Edge.Cuts, 3 PTH, 7 + 29 flashes of which 26 bottom-side, 33 keys; library: 4 drift pads) |
 
@@ -191,8 +192,8 @@ footprints from 12-17 libraries, KiCad 6 / 7 `fp_text reference` footprints (the
 rewrites `fp_text reference / value` as well as the KiCad 8+ properties, otherwise an older library's footprint keeps "REF**"),
 and parts on both sides (above).  By the second set: 437 footprints / 1639 pads on one board, V-cut and mouse-bite panels with
 duplicated references (same nets per copy), chamfered and odd-ratio roundrect pads, castellated oval pads with `(drill (offset))`,
-mask-only pads, `gr_poly` cutouts with 123 vertices, 22 `gr_circle` cutouts, NPTH-only mouse-bite footprints, user-named copper
-layers, KiCad 9 (20241229) files.  Two `cadview/pcb.py` fixes came out of it: the s-expression parser takes only plain decimals as
+mask-only pads, `gr_poly` cutouts with 123 vertices, 22 `gr_circle` cutouts, NPTH-only mouse-bite footprints, oval NPTH slots
+(mozc's 216, through the drill table), user-named copper layers, KiCad 9 (20241229) files.  Two `cadview/pcb.py` fixes came out of it: the s-expression parser takes only plain decimals as
 numbers (hackrf's hex `(tedit 527E5841)` was read as inf and crashed the writer; section 1), and Edge.Cuts points are written at 6
 decimals (jumperless' 58 mm flat arcs lost 0.1 mm of centre at 4; section 6).  By the third set: a KiCad 5 file's footprints
 (re-embedded with their legacy syntax - bare layer names, `(width w)`, `fp_text`, hex `tedit` - which KiCad 10 reads in a
@@ -200,10 +201,13 @@ decimals (jumperless' 58 mm flat arcs lost 0.1 mm of centre at 4; section 6).  B
 pads whose anchor is offset from the drill (neopico), a flex outline of five polygons and a Polyimide stackup in the original
 (fly2040 - the DSL re-expresses the outline, not the stackup: it writes FR4), rounded tracks / 658 teardrop zones / net ties /
 keepout rule areas / groups parsed and left out of the comparison (placebo, olimex, locust, adsbee), an unrouted board
-(locust: placement, drills and nets only), a V-cut panel of 12 coupons (adsbee's 14-line frame), and blind / buried / micro
-vias on 4 and 6 layers refused by the DSL (fomu, linear motor; `test_blind_buried_vias_are_refused` hands the original's vias
-to `kicad_pcb(traces=...)` and expects the ValueError, and that the same board's through vias - including oxplot's one with a
-stray `blind` flag - are written).
+(locust: placement, drills and nets only), a V-cut panel of 12 coupons (adsbee's 14-line frame outline; its pads only per the
+report line, see the row), plated slots on a KiCad 5 / 7.99 / 7 board (oxplot's, locust's, olimex's USB-C shells), and blind /
+buried / micro vias on 4 and 6 layers refused by the DSL (fomu, linear motor; `test_blind_buried_vias_are_refused` hands the
+first such via of the original to `kicad_pcb(traces=...)` and expects the ValueError, then hands one through via of the same
+board - oxplot's with the stray `blind` flag first - and expects one `(via ...)` node back; the count only, its `F.Cu` / `B.Cu`
+layers are asserted by section 6's unit test).  Of the third set's custom pads with anchors, neopico's 54 are asserted in both
+variants and fomu's 36 in the embedded one; oxplot's 8 by no passing test (its row).
 
 - `test_fixture_matches_sources` - sha256 of the (decompressed) fixture equals the SOURCES.md row.
 - `test_fixture_is_what_we_think` - footprints, Edge.Cuts (at board level or inside a footprint), routing present unless the board
@@ -223,9 +227,11 @@ stray `blind` flag - are written).
 - `test_netlists_match_pad_by_pad` - `kicad_parse` reads both `.kicad_pcb`: the same net on every `(ref, pad)` (12 to 1369 keys,
   0 differ; a duplicated reference's key lists every copy's net) and the same set of net names.
 - `test_blind_buried_vias_are_refused` - on a board with a via that does not span the whole stack (by its layers, not its flag):
-  that via as a Circuit JSON via point (`from_layer` / `to_layer`) through `kicad_pcb(traces=...)` raises a ValueError naming
-  "blind / buried via"; a through via of the same board is written as `(layers "F.Cu" "B.Cu")`.  Embedded variant only (the
-  check owes nothing to the footprints); skipped on an unrouted board.
+  the first such via as a Circuit JSON via point (`from_layer` / `to_layer`) through `kicad_pcb(traces=...)` raises a ValueError
+  naming "blind / buried via"; one through via of the same board (if it has one) comes back as exactly one `(via ...)` node - the
+  node count is asserted, its layers are not (section 6's unit test asserts `(layers "F.Cu" "B.Cu")`).  One via of each kind per
+  board, not all of them: the "249 of 249" / "60 of 60" in the report lines are the oracle's classification.  Embedded variant
+  only (the check owes nothing to the footprints); skipped on a board without vias (stepper, jumperless, locust).
 
 **4. JLC outputs** (`test_jlc.py`): a fixture board with R1 / R2 (same part), C1 placed at -90, U1 at 180, J1 without an LCSC
 number, a `bom_only` part on another part's pads and a `bom_only(assemble=False)` lead.
@@ -331,9 +337,15 @@ between two through vias.
 - **Blind / buried / micro vias** are refused, not expressed: the DSL has no via that stops at an inner layer, and the
   fixtures that have them (fomu, linear motor) are compared with their routing left out like every other board's.
 - **A flex stackup** (fly2040's 0.025 mm Polyimide core) is not re-expressed: `Board` writes an FR4 stackup of its own
-  `thickness`; only the flex outline and parts are compared.  Teardrops, rounded tracks, net-tie groups, keepout rule areas and
-  groups in a fixture are parsed (`_features`) and excluded from the comparison; the DSL writes none of them (its own
-  `keepout()` is the untested rule area above).
+  `thickness`; only the flex outline and parts are compared.  Teardrops, rounded tracks, keepout rule areas, V-cut texts and
+  groups in a fixture are parsed by the ORACLE (`kicad_parse`, for `_features`) and excluded from the comparison - the DSL has no
+  board reader (`kicad_footprint()` is its only parser) and never sees a board-level item, so "the DSL parses teardrops / rule
+  areas" is not something this suite can show; it writes none of them either (its own `keepout()` is the untested rule area
+  above).  What the DSL does parse from these fixtures is the footprint blocks: `net_tie_pad_groups` (re-emitted, unasserted),
+  custom-pad `(anchor ...)` primitives, `(at x y unlocked)`, KiCad 5 legacy syntax, KiCad 7.99+ `(property ...)` fields.
+- **The pads of the three net-gap boards** (wiimote, adsbee, oxplot-embedded) are asserted by no passing test: the gap rows xfail
+  `test_pad_flashes_match` as a whole, so their pad geometry (wiimote's 4 custom pads, adsbee's 24 coax connectors, oxplot's 8
+  anchored custom pads - also library drift in the other variant) is matched only in the report lines.
 - **KiCad 5 files** are proven as fixtures (the oracle reads them, their footprints are re-embedded with their legacy syntax and
   KiCad 10 accepts the result); the DSL never writes KiCad 5 and `kicad_footprint()` reads a KiCad 5 `.kicad_mod` only as the
   harness rewrites it (`(footprint "Name"` head).

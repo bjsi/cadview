@@ -145,6 +145,36 @@ def build():
 # (board, brackets, bins) by one 180 mm pitch and back
 SHELF_PITCH = [("shelf (adjustable)", "tz", [0, 0.8, 2.2, 3.2, 4.6], [0, 0, 180, 180, 0])]
 
+
+def assembly():
+    """The build order as a clip: each phase is a chapter, its parts start
+    hidden and drop into place from 400 mm up (chapter cameras frame the work)."""
+    from cadview import Timeline
+    tl = Timeline()
+    phases = [
+        ("legs", ["leg front left", "leg front right", "leg back left", "leg back right",
+                  "foot rail left", "foot rail right"], {"view": "iso", "zoom": 1.0}),
+        ("frame", ["long rail front", "long rail back", "cross rail left", "cross rail centre",
+                   "cross rail right", "bracket"], None),
+        ("top", ["MDF top"], None),
+        ("uprights", ["upright x=-950", "upright x=+0", "upright x=+950", "pegboard left", "pegboard right"],
+         {"view": "front", "zoom": 1.1}),
+        ("shelf", ["shelf (adjustable)"], {"focus": "shelf (adjustable)", "view": "iso", "zoom": 1.5}),
+        ("ceiling", ["ceiling (flat)", "ceiling (slope)"], {"view": "iso", "zoom": 1.0}),
+    ]
+    t = 0.0
+    for name, parts, camera in phases:
+        tl.chapter(name, t, camera)
+        for i, sel in enumerate(parts):
+            start = t + 0.3 + 0.25 * i                         # one after another within the phase
+            tl.hide(sel, start=0, until=start)
+            tl.move(sel, "tz", 400, start=0, dur=0)            # parked above its place ...
+            tl.move(sel, "tz", 0, start=start, dur=0.8)        # ... and lowered in
+        t += 0.25 * len(parts) + 1.0
+    return tl.clip("assembly", end=t)
+
+
 if __name__ == "__main__":
     from cadview import show
-    show(build(), title="Mega desk", animation=[{"name": "shelf: one pitch up", "tracks": SHELF_PITCH}])
+    show(build(), title="Mega desk", animation=[assembly(),
+                                                {"name": "shelf: one pitch up", "tracks": SHELF_PITCH}])

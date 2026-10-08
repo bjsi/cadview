@@ -1,26 +1,25 @@
 # cadview
 
 Live browser viewer for [build123d](https://github.com/gumyr/build123d) /
-CadQuery — a drop-in `show()` for OCP CAD Viewer / ocp_vscode users.
+CadQuery — a drop-in `show()` for OCP CAD Viewer / ocp_vscode users, with
+animation, a gallery, an agent's eyes and a board layout layer.
 
 <table><tr>
 <td width="50%"><img src="docs/ui.png" alt="the viewer"/></td>
 <td width="50%"><img src="docs/gallery.png" alt="the gallery"/></td>
 </tr></table>
 
-Same call, plus:
-
-- **Persistent** — scenes live on the server with revision history;
-  reopen a browser anytime, nothing to re-run
-- **Faster** — ~3× quicker scene builds; keeps rendering in background
-  windows; `quality="preview"` while iterating
-- **Animations** — named clips from keyframe tracks, collision-checked
-  during playback, ⏺ records to video
-- **Agent-native** — Claude Code reads your selection and part positions,
-  verifies animations headlessly
-- **Multi-scene, multi-device** — every design on one server with a
-  searchable thumbnail gallery, live on desktop and phone
-- **Boards** — lay a PCB out from the CAD: KiCad project + schematic,
+- **Persistent** — scenes live on the server with revision history; reopen
+  a browser anytime, nothing to re-run
+- **Faster** — ~3× quicker scene builds, keeps rendering in background
+  windows, `quality="preview"` while iterating
+- **Animations** — named clips from keyframe tracks, chapters on the scrub
+  bar, collision-checked, ⏺ records to video
+- **Agent-native** — Claude Code reads your selection, takes its own
+  snapshots, verifies animations headlessly
+- **Multi-scene, multi-device** — every design on one server, a searchable
+  thumbnail gallery, live on desktop and phone
+- **Boards** — lay a PCB out from the CAD: KiCad project, autorouting,
   JLCPCB files, the populated board back in the assembly
 
 ## Install
@@ -39,15 +38,14 @@ show(model)                         # nested Compound labels/colors -> part tree
 ```
 
 Open `http://127.0.0.1:3941/<project>` (`<project>` = the directory your
-script ran from). Click parts or faces to select — alt-click for the whole
-part, two selections show the distance between them, double-click finds a
-part in the tree, ⏺ records the playing clip to video.
+script ran from). Click parts or faces to select, alt-click for the whole
+part, two selections measure the distance between them, double-click
+finds a part in the tree.
 
-Try it without installing: **[bjsi.github.io/cadview](https://bjsi.github.io/cadview/)** —
-or locally: `python examples/mega_desk.py` (a 2 m workbench with shelving,
-~50 parts in groups) and `python examples/gantry.py` (an XY gantry with a
-stacked Z and gripper, animated) → `http://127.0.0.1:3941/` lists them;
-`examples/demo.py` is the minimal one, `examples/parts.py` fills the gallery.
+Try it without installing: **[bjsi.github.io/cadview](https://bjsi.github.io/cadview/)**.
+Locally, `python examples/mega_desk.py` (a 2 m workbench, ~50 parts) and
+`python examples/gantry.py` (an XY gantry with a stacked Z and gripper)
+fill `http://127.0.0.1:3941/`.
 
 ## Animate
 
@@ -62,28 +60,35 @@ show(build(), animation=[{"name": "pick & place", "tracks": PICK}])
 ```
 
 A track is `(selector, action, times, values)`: selectors match part
-labels, actions are `tx/ty/tz` (mm), `rx/ry/rz` (degrees about the node's
-own origin), `vis` (show/hide) and `q`; tracks on the same node add
-together, and a node carries its children — the gripper rides Z2, Z2 rides
-Z1, Z1 rides the X carriage. Clips get a dropdown; a clip's `chapters`
-(`[{"t": 4.0, "name": "feeder"}, …]`) become ticks on the scrub bar — the
-current one is named above the bar, a click jumps there, a chapter's
-optional `"camera": {"focus": part, "view": …, "zoom": …}` is posed when it
-starts, and `cadview_snapshot(chapter="feeder")` shoots it; ⚠ toggles the
-animated collision check. The gif is a real lab gantry (266 parts, its source lives
-in its own repo) driven by exactly such tracks on its carriages, Z stages,
-gripper fingers and the ring; `examples/gantry.py` is a simplified machine
-you can run, `examples/demo.py` a one-track drawer. Agents (or you) can fetch every
-part's world bbox from `GET /api/parts` and verify tracks headlessly with
-`POST /api/clearance`; `cadview.Timeline` builds tracks phase-by-phase if
-the arrays get unwieldy — see `docs/DETAILS.md`.
+labels, actions are `tx/ty/tz` (mm), `rx/ry/rz` (degrees), `vis` and `q`;
+a node carries its children, so the gripper rides Z2, Z2 rides Z1, Z1
+rides the X carriage. The gif is a real 266-part lab gantry driven by
+tracks like these; `examples/gantry.py` is a simplified one you can run.
+
+![the mega desk assembling itself, one chapter per phase](docs/assembly.gif)
+
+```python
+tl = Timeline()
+for name, parts in [("legs", LEGS), ("frame", FRAME), ("top", ["MDF top"]), ("shelf", ["shelf (adjustable)"])]:
+    tl.chapter(name, t, camera={"focus": parts[0], "view": "iso"})
+    for i, p in enumerate(parts):
+        tl.hide(p, start=0, until=t + i * 0.25)
+        tl.move(p, "tz", 400, start=0, dur=0); tl.move(p, "tz", 0, start=t + i * 0.25, dur=0.8)
+    t += len(parts) * 0.25 + 1
+show(build(), animation=[tl.clip("assembly")])
+```
+
+`Timeline` builds tracks phase by phase; chapters become ticks on the
+scrub bar — the current one is named above it, a click jumps there, a
+chapter's camera is posed as it starts. ⚠ toggles the animated collision
+check. Agents fetch every part's world bbox from `GET /api/parts` and
+verify tracks headlessly with `POST /api/clearance` (`examples/mega_desk.py`
+has the full clip).
 
 ## With Claude Code
 
-In the desktop app, make the viewer your project's preview server — the
-Browser pane then starts it and opens the gallery by itself
-(`.claude/launch.json`; `cadview` is idempotent on its port, so a viewer
-already running in a terminal is reused):
+Make the viewer the project's preview server (`.claude/launch.json`) and
+add the selection tool to `.mcp.json`:
 
 ```json
 { "version": "0.0.1", "configurations": [
@@ -91,23 +96,16 @@ already running in a terminal is reused):
       "port": 3941, "autoPort": false } ] }
 ```
 
-Add the selection tool to your project's `.mcp.json`:
-
 ```json
-{ "mcpServers": { "cadview": {
-    "command": "python", "args": ["-m", "cadview.mcp"] } } }
+{ "mcpServers": { "cadview": { "command": "python", "args": ["-m", "cadview.mcp"] } } }
 ```
 
-Select geometry on the page, then just say "make these 5 mm taller" — the
-agent's `cadview_selection` tool returns exactly what you picked, with
-measurements. Agents without MCP can `GET /api/selection?name=<project>`.
-
-The Browser pane is the person's: an agent should not navigate it to check
-its own work. `cadview_snapshot` (or `GET /api/snapshot?name=<project>
-&view=top&focus=<part>&hide=<parts>&t=<s>`) returns a PNG rendered in a
-hidden frame of whatever cadview page is open — any view, any part framed,
-any animation time — and the page the person is looking at never changes.
-`GET /api/parts?name=<project>` gives positions without a picture.
+Select geometry on the page and say "make these 5 mm taller": the agent's
+`cadview_selection` tool returns exactly what you picked, with
+measurements. `cadview_snapshot` (or `GET /api/snapshot?name=<project>
+&view=top&focus=<part>&t=<s>`) returns a PNG rendered in a hidden frame
+of whatever cadview page is open, so the agent checks its own work and
+the page you are looking at never changes.
 
 ## Boards
 
@@ -127,34 +125,27 @@ b.write_jlc("out")                                    # bom.csv + cpl.csv for JL
 show(enclosure + b.solid())                           # the populated board back in the assembly
 ```
 
-`cadview.pcb` lays a PCB out from the CAD instead of a schematic-first
-tool: the outline, holes and cutouts (lines, arcs, beziers, circles) come
-off a build123d Face, footprints and symbols come from KiCad's own
-libraries on disk (no KiCad binary needed to write), parts go on either
-side of a 2- or 4-layer board with nets, pours, keepouts, hand traces and
-silkscreen, and the outputs are a `.kicad_pcb` + schematic an agent can
-edit by line and `kicad-cli` can check and export (`tools/pcb/kicad_export.sh`:
-DRC, ERC, Gerbers, drill, STEP), autorouted either by Freerouting
-(`tools/pcb/freeroute.py board.kicad_pcb --drc`: DSN out, routed board back,
-DRC counts — the stepper board below routes clean in 8 s) or tscircuit's
-router from its Circuit JSON (`tools/pcb/export.mjs`), JLCPCB BOM + CPL, and `solid()` —
-the board with its parts' STEP models as build123d geometry, so it sits in
-the enclosure while you design both. The picture is `examples/stepper_board.py`:
-John McAleely's [stepper playground](https://github.com/jhmcaleely/stepper-playground)
-(MIT) re-expressed as seventeen placements and 41 nets, written back out
-and shown. What the layer writes is proven against twenty-seven open-source
-KiCad boards re-expressed through it, Gerber for Gerber (`tests/pcb`).
-`pip install cadview[pcb]`; needs KiCad's footprint, symbol and 3D
-libraries (`KICAD_FOOTPRINTS`, `KICAD_SYMBOLS`, `KICAD_3DMODELS`).
+The outline and cutouts come off a build123d Face, footprints and symbols
+from KiCad's own libraries, parts on either side of a 2- or 4-layer board
+with nets, pours, keepouts and silkscreen. `kicad-cli` checks and exports
+the result (`tools/pcb/kicad_export.sh`), Freerouting routes it
+(`tools/pcb/freeroute.py board.kicad_pcb --drc`; tscircuit via
+`tools/pcb/export.mjs`), and `solid()` puts the populated board back in
+the enclosure while you design both. The picture is
+`examples/stepper_board.py`, John McAleely's
+[stepper playground](https://github.com/jhmcaleely/stepper-playground) (MIT)
+re-expressed as seventeen placements and 41 nets; the layer is proven
+Gerber for Gerber against 27 open-source KiCad boards (`tests/pcb`).
+`pip install cadview[pcb]`; needs KiCad's libraries on disk
+(`KICAD_FOOTPRINTS`, `KICAD_SYMBOLS`, `KICAD_3DMODELS`).
 
 ## Review pages
 
 `python -m cadview.bake --single-file out/` writes one self-contained
-`<scene>.html` per scene — viewer, three.js and the scene inlined; opens
-from a file or an attachment with full orbit / part tree / hide / measure /
-animation. `--changed-vs cadview-scenes.tar.gz` keeps only scenes whose
-geometry differs from a bundle (what a PR changed). Without `--single-file`
-it bakes a static multi-scene site (the demo site is one).
+`<scene>.html` per scene with full orbit, part tree, measure and
+animation — opens from a file or an attachment. `--changed-vs
+cadview-scenes.tar.gz` keeps only the scenes a PR changed; without
+`--single-file` it bakes a static multi-scene site (the demo site is one).
 
 ## More
 
