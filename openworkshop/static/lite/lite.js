@@ -1,4 +1,4 @@
-// cadview lite — minimal viewer core on bare three.js (see index.html rules).
+// openworkshop lite — minimal viewer core on bare three.js (see index.html rules).
 // Renders the same scene JSON the tcv viewer eats: shapes tree (loc = [[t],[q]]
 // accumulated down the tree, per-part color/alpha) + flat deduped instance
 // buffers. Event-driven rendering only — no requestAnimationFrame loop, so it
@@ -378,7 +378,7 @@ async function snapshot() {
     } catch (e) {
         console.warn("snapshot failed", e);
     }
-    try { window.parent.postMessage({ cadviewSnapDone: p.snap }, "*"); } catch { }
+    try { window.parent.postMessage({ openworkshopSnapDone: p.snap }, "*"); } catch { }
 }
 function renderSnapshot(msg) {
     const params = new URLSearchParams({ snap: msg.id, ...(msg.params || {}) });
@@ -387,7 +387,7 @@ function renderSnapshot(msg) {
     f.style.cssText = `position:fixed;left:-${w + 100}px;top:0;width:${w}px;height:${h}px;border:0;visibility:hidden`;
     f.src = "./" + encodeURIComponent(msg.name) + "?" + params;
     const done = (e) => {
-        if (e.data?.cadviewSnapDone !== msg.id) return;
+        if (e.data?.openworkshopSnapDone !== msg.id) return;
         f.remove();
         window.removeEventListener("message", done);
     };
@@ -1298,7 +1298,7 @@ function setSelMode(mode) {
 }
 
 // ---- live selection -> server: agents pull it (GET /api/selection or the
-// cadview MCP tool) instead of James typing messages at them from the page
+// openworkshop MCP tool) instead of James typing messages at them from the page
 let selPushTimer = 0;
 function pushSelection() {
     if (!project || !connected) return;
@@ -1409,7 +1409,7 @@ function onRunEvent(msg) {
         setRunStatus(`✓ rebuilt in ${msg.seconds}s`, "ok");
     } else if (msg.status === "error") {
         setRunStatus("✗ " + (msg.tail?.length ? msg.tail[msg.tail.length - 1] : "run failed"), "err");
-        console.warn("cadview run failed:\n" + (msg.tail || []).join("\n"));
+        console.warn("openworkshop run failed:\n" + (msg.tail || []).join("\n"));
     }
 }
 
@@ -1424,10 +1424,10 @@ let lastReceivedAt = null;
 async function fetchScene() {
     const t0 = performance.now();
     let text;
-    if (window.CADVIEW_INLINE_SCENE) {
-        // a single-file bake (python -m cadview.bake --single-file): the
+    if (window.OPENWORKSHOP_INLINE_SCENE) {
+        // a single-file bake (python -m openworkshop.bake --single-file): the
         // scene is gzipped + base64 inside this very page, no server at all
-        const bytes = Uint8Array.from(atob(window.CADVIEW_INLINE_SCENE), (c) => c.charCodeAt(0));
+        const bytes = Uint8Array.from(atob(window.OPENWORKSHOP_INLINE_SCENE), (c) => c.charCodeAt(0));
         text = await new Response(new Blob([bytes]).stream().pipeThrough(new DecompressionStream("gzip"))).text();
     } else {
         const url = "/api/scene" + (project ? "?name=" + encodeURIComponent(project) : "");
@@ -1528,7 +1528,7 @@ function connect() {
 }
 
 // debug/automation handle, mirroring the main shell's
-window.cadviewLite = { timings, fitView, togglePick, setSelMode, playPause, applyAnimTime, loadClip, get clips() { return animClips.map((c) => c.name); }, get anim() { return anim; }, get clearanceHits() { return clearance ? [...clearance.hits] : []; }, get selection() { return mySel; }, get selMode() { return selMode; }, get parts() { return partsIndex; }, get scene() { return scene; } };
+window.openworkshopLite = { timings, fitView, togglePick, setSelMode, playPause, applyAnimTime, loadClip, get clips() { return animClips.map((c) => c.name); }, get anim() { return anim; }, get clearanceHits() { return clearance ? [...clearance.hits] : []; }, get selection() { return mySel; }, get selMode() { return selMode; }, get parts() { return partsIndex; }, get scene() { return scene; } };
 
 resize();
 fetchScene().finally(connect);

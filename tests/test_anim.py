@@ -1,5 +1,5 @@
 import unittest
-from cadview.anim import Timeline
+from openworkshop.anim import Timeline
 
 
 class TimelineTests(unittest.TestCase):

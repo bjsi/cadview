@@ -1,7 +1,7 @@
 """A few generic parts, each pushed as its own scene — populates the gallery
 (http://127.0.0.1:3941/) so you can see the multi-design overview.
 
-    python -m cadview.server      # in another terminal
+    python -m openworkshop.server      # in another terminal
     python examples/parts.py      # pushes 4 scenes; open / to browse them
 """
 
@@ -65,7 +65,7 @@ SCENES = {
 }
 
 if __name__ == "__main__":
-    from cadview import show
+    from openworkshop import show
     for scene, (title, build) in SCENES.items():
-        os.environ["CADVIEW_SCENE"] = scene
+        os.environ["OPENWORKSHOP_SCENE"] = scene
         show(build(), title=title)

@@ -10,7 +10,7 @@ import os
 from build123d import (Align, Box, Circle, Color, Compound, Cylinder, Pos,
                        PolarLocations, Rectangle, RectangleRounded, Rot, extrude)
 
-os.environ.setdefault("CADVIEW_SCENE", "mega-desk")
+os.environ.setdefault("OPENWORKSHOP_SCENE", "mega-desk")
 
 # ---- desk ------------------------------------------------------------------
 DESK_L, DESK_W, TOP_T = 2000.0, 800.0, 18.0
@@ -149,7 +149,7 @@ SHELF_PITCH = [("shelf (adjustable)", "tz", [0, 0.8, 2.2, 3.2, 4.6], [0, 0, 180,
 def assembly():
     """The build order as a clip: each phase is a chapter, its parts start
     hidden and drop into place from 400 mm up (chapter cameras frame the work)."""
-    from cadview import Timeline
+    from openworkshop import Timeline
     tl = Timeline()
     phases = [
         ("legs", ["leg front left", "leg front right", "leg back left", "leg back right",
@@ -175,6 +175,6 @@ def assembly():
 
 
 if __name__ == "__main__":
-    from cadview import show
+    from openworkshop import show
     show(build(), title="Mega desk", animation=[assembly(),
                                                 {"name": "shelf: one pitch up", "tracks": SHELF_PITCH}])

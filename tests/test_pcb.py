@@ -1,10 +1,10 @@
-"""cadview.pcb without a CAD kernel: the KiCad reader/writer and pad maths."""
+"""openworkshop.pcb without a CAD kernel: the KiCad reader/writer and pad maths."""
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from cadview import pcb
+from openworkshop import pcb
 
 MOD = '''(footprint "Test_1x02" (version 20240108) (generator "pcbnew")
   (layer "F.Cu")

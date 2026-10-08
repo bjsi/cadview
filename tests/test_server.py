@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 from aiohttp import web, WSMsgType
 from aiohttp.test_utils import TestClient, TestServer
-from cadview import server
+from openworkshop import server
 from scene_fixture import box_scene
 
 
@@ -27,24 +27,24 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
         for p in reversed(self.patches): p.stop()
         self.tmp.cleanup()
 
-    async def test_running_cadview_recognises_a_live_server_only(self):
-        # `cadview` started twice (terminal + desktop preview) must park on
+    async def test_running_openworkshop_recognises_a_live_server_only(self):
+        # `openworkshop` started twice (terminal + desktop preview) must park on
         # the first instead of failing — the probe is what decides that
         port = self.client.port
-        self.assertTrue(await asyncio.to_thread(server.running_cadview, '127.0.0.1', port))
-        self.assertFalse(await asyncio.to_thread(server.running_cadview, '127.0.0.1', 1))
+        self.assertTrue(await asyncio.to_thread(server.running_openworkshop, '127.0.0.1', port))
+        self.assertFalse(await asyncio.to_thread(server.running_openworkshop, '127.0.0.1', 1))
 
     async def test_manifest_designs_are_cards_before_their_first_build(self):
-        # a fresh clone's gallery lists every design in cadview.json at once;
+        # a fresh clone's gallery lists every design in openworkshop.json at once;
         # the server builds them (serially) and the rows say so meanwhile
         root = Path(self.tmp.name) / 'repo'
         (root / 'parts').mkdir(parents=True)
         (root / 'parts' / 'widget.py').write_text('print("hi")\n')
-        (root / 'cadview.json').write_text(json.dumps({'designs': [
+        (root / 'openworkshop.json').write_text(json.dumps({'designs': [
             {'scene': 'widget', 'title': 'The widget', 'script': 'parts/widget.py'},
             {'scene': 'bad name!', 'script': 'parts/widget.py'},
             {'scene': 'ghost', 'script': 'parts/missing.py'}]}))
-        with patch.object(server, 'MANIFEST', root / 'cadview.json'), \
+        with patch.object(server, 'MANIFEST', root / 'openworkshop.json'), \
                 patch.object(server, 'RUN_ROOTS', [root]), \
                 patch.object(server, 'RUN_REGISTRY', root / 'runnable.txt'):
             self.assertEqual([s for s, _t, _p in server._manifest()], ['widget'])
@@ -75,7 +75,7 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
         root = Path(self.tmp.name) / 'repo'
         root.mkdir()
         (root / 'widget.py').write_text('print(1)\n')
-        bundle = Path(self.tmp.name) / 'cadview-scenes.tar.gz'
+        bundle = Path(self.tmp.name) / 'openworkshop-scenes.tar.gz'
         buf = io.BytesIO()
         with tarfile.open(fileobj=buf, mode='w:gz') as tar:
             def add(name, data):
@@ -86,10 +86,10 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
             add('scene-other.json.gz', gzip.compress(json.dumps(box_scene(9)).encode()))
             add('bundle.json', b'{"commit": "deadbeef"}')
         bundle.write_bytes(buf.getvalue())
-        (root / 'cadview.json').write_text(json.dumps({
+        (root / 'openworkshop.json').write_text(json.dumps({
             'designs': [{'scene': 'widget', 'script': 'widget.py'}],
             'prebuilt': {'url': bundle.as_uri()}}))
-        with patch.object(server, 'MANIFEST', root / 'cadview.json'), patch.object(server, 'RUN_ROOTS', [root]):
+        with patch.object(server, 'MANIFEST', root / 'openworkshop.json'), patch.object(server, 'RUN_ROOTS', [root]):
             seeded, commit = server._seed_prebuilt(self.app['store'], {'widget'})
             self.assertEqual((seeded, commit), (['widget'], 'deadbeef'))
             self.assertIn('widget', self.app['store'].meta)
@@ -141,11 +141,11 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_bake_single_file_pages_and_changed_vs_bundle(self):
         import base64, gzip, io, tarfile
-        from cadview import bake
+        from openworkshop import bake
         await self.push(width=10, project='same')
         await self.push(width=10, project='moved')
         before = {'same': box_scene(10), 'moved': box_scene(11)}    # main's bundle: 'moved' differs
-        bundle = Path(self.tmp.name) / 'cadview-scenes.tar.gz'
+        bundle = Path(self.tmp.name) / 'openworkshop-scenes.tar.gz'
         with tarfile.open(bundle, 'w:gz') as tar:
             for p, msg in before.items():
                 data = gzip.compress(json.dumps(msg).encode())
@@ -162,14 +162,14 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(report['scenes']['moved']['changed'])                    # the wider box, by part path
         self.assertTrue(all(p.startswith('/Assembly/') for p in report['scenes']['moved']['changed']))
         # the signature is what survives a rebuild: re-encoding the same mesh in a different vertex order is no change
-        from cadview import bake as _bake
+        from openworkshop import bake as _bake
         same = box_scene(10)
         self.assertEqual(_bake.scene_diff(same, json.loads(json.dumps(same))), {'changed': [], 'added': [], 'removed': [], 'animation': False})
         self.assertFalse((out / 'same.html').exists())
         page = (out / 'moved.html').read_text()
         self.assertNotIn('./vendor/', page)                    # nothing fetched: modules are data: URLs
         self.assertIn('"three-core": "data:text/javascript;base64,', page)
-        b64 = page.split('window.CADVIEW_INLINE_SCENE = "')[1].split('"')[0]
+        b64 = page.split('window.OPENWORKSHOP_INLINE_SCENE = "')[1].split('"')[0]
         inline = json.loads(gzip.decompress(base64.b64decode(b64)))
         self.assertEqual(inline['data'], box_scene(10)['data'])
         self.assertNotIn('source_file', inline['meta'])          # push-side meta stripped
@@ -210,12 +210,12 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.client.get('/api/scene?name=demo')).status, 200)
 
     def test_client_scene_name_comes_from_the_nearest_manifest(self):
-        from cadview import client
+        from openworkshop import client
         root = Path(self.tmp.name) / 'repo'
         (root / 'tools').mkdir(parents=True)
         script = root / 'tools' / 'show_thing.py'
         script.write_text('')
-        (root / 'cadview.json').write_text(json.dumps({'designs': [
+        (root / 'openworkshop.json').write_text(json.dumps({'designs': [
             {'scene': 'thing', 'title': 'A thing', 'script': 'tools/show_thing.py'}]}))
         self.assertEqual(client._manifest_design(str(script)), ('thing', 'A thing'))
         other = root / 'tools' / 'other.py'

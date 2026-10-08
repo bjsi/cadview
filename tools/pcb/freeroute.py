@@ -12,7 +12,7 @@ the counts). Freerouting's automatic neck-down is off (it narrows trace ends to 
 minimum, and DRC flags every one); `--neckdown` turns it back on.
 
 Needs: KiCad with its Python bindings (run this with KiCad's Python: KICAD_PYTHON, default `python3`), Java 21+
-(FREEROUTING_JAVA, default `java`), and the Freerouting jar: FREEROUTING_JAR, else ~/.cache/cadview/freerouting-<v>.jar,
+(FREEROUTING_JAVA, default `java`), and the Freerouting jar: FREEROUTING_JAR, else ~/.cache/openworkshop/freerouting-<v>.jar,
 which this script downloads from GitHub on first use. The other autorouter here is tools/pcb/export.mjs (tscircuit,
 from Circuit JSON, no KiCad needed); this one is the stronger push-and-shove router for dense boards.
 """
@@ -36,7 +36,7 @@ def jar_path() -> Path:
     p = os.environ.get("FREEROUTING_JAR")
     if p:
         return Path(p)
-    cache = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "cadview"
+    cache = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "openworkshop"
     cache.mkdir(parents=True, exist_ok=True)
     jar = cache / f"freerouting-{FREEROUTING_VERSION}.jar"
     if not jar.exists():

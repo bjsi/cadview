@@ -1,0 +1,15 @@
+{
+    "name": "openworkshop",
+    "version": "0.3.0",
+    "description": "Read the current openworkshop viewer selection (parts/faces with measurements) from any Claude Code session — select geometry on the page, then just say 'these'.",
+    "mcpServers": {
+        "openworkshop": {
+            "command": "node",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/server.mjs"],
+            "env": {
+                "OPENWORKSHOP_URL": "${user_config.url}",
+                "OPENWORKSHOP_PROJECT": "${user_config.project}"
+            }
+        }
+    }
+}

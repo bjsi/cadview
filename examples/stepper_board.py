@@ -1,5 +1,5 @@
 """The 12 V stepper playground — a real Pico board (John McAleely, MIT), laid out
-again through cadview.pcb: the same 82 x 68 mm outline, the same seventeen
+again through openworkshop.pcb: the same 82 x 68 mm outline, the same seventeen
 KiCad library footprints at the same places, the same 41 nets on the same pads,
 written back out as a KiCad project + JLCPCB files and shown with the parts'
 STEP models on the board.
@@ -9,16 +9,16 @@ STEP models on the board.
 Source: https://github.com/jhmcaleely/stepper-playground (12v-pico/12v-pico.kicad_pcb,
 commit d3c5cc9), MIT licence, (c) 2022 John McAleely — the placement and netlist below are
 that board's, re-expressed; copper routing is not reproduced (route it in KiCad or with
-tools/pcb/export.mjs). Needs `pip install cadview[pcb]` and KiCad's libraries on disk.
+tools/pcb/export.mjs). Needs `pip install openworkshop[pcb]` and KiCad's libraries on disk.
 """
 import os
 from pathlib import Path
 
 from build123d import Pos, RectangleRounded
 
-from cadview.pcb import Board, kicad_footprint
+from openworkshop.pcb import Board, kicad_footprint
 
-os.environ.setdefault("CADVIEW_SCENE", "stepper-board")
+os.environ.setdefault("OPENWORKSHOP_SCENE", "stepper-board")
 
 W, H = 82.0, 68.0                  # the board's Edge.Cuts rectangle, lower-left at (0, 0)
 
@@ -116,7 +116,7 @@ def build():
 
 
 if __name__ == "__main__":
-    from cadview import show
+    from openworkshop import show
     b = build()
     out = Path("out/stepper-board")
     out.mkdir(parents=True, exist_ok=True)

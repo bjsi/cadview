@@ -1,7 +1,7 @@
 [project]
-name = "cadview"
-version = "0.2.0"
-description = "Persistent browser viewer for build123d/CadQuery — drop-in show(), live re-pushes, animations, selection agents can query"
+name = "openworkshop"
+version = "0.3.0"
+description = "The workshop around build123d/CadQuery: a persistent live viewer with animations, a gallery, an agent's eyes, and PCB layout from the CAD (formerly cadview)"
 readme = "README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.10"
@@ -11,18 +11,19 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-pcb = ["shapely>=2"]            # cadview.pcb: board outlines from build123d faces
+pcb = ["shapely>=2"]            # openworkshop.pcb: board outlines from build123d faces
 dev = ["pytest", "gerbonara"]   # tests/pcb: the KiCad conformance suite (needs kicad-cli + KiCad libraries)
 
 [project.scripts]
-cadview = "cadview.server:main"
+openworkshop = "openworkshop.server:main"
+cadview = "openworkshop.server:main"        # pre-rename name
 
 [build-system]
 requires = ["setuptools>=64"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-packages = ["cadview"]
+packages = ["openworkshop", "cadview"]       # cadview = import shim for the old name
 
 [tool.setuptools.package-data]
-cadview = ["static/lite/*", "static/lite/vendor/*", "plugin/*"]
+openworkshop = ["static/lite/*", "static/lite/vendor/*", "plugin/*"]

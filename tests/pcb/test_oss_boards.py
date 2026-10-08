@@ -582,7 +582,7 @@ def test_blind_buried_vias_are_refused(oss):
 def test_netlists_match_pad_by_pad(oss):
     a = oss["rec"].pad_nets()
     regen = oss["regen_rec"]
-    regen.footprints = [fp for fp in regen.footprints if not fp.name.startswith("cadview:")]   # the DSL's own NPTH footprints for circular cutouts
+    regen.footprints = [fp for fp in regen.footprints if not fp.name.startswith("openworkshop:")]   # the DSL's own NPTH footprints for circular cutouts
     b = regen.pad_nets()
     drift = set(oss["drift"])                                           # library variant: a pad the installed library renamed cannot carry its net
     assert set(a) - drift == set(b) - drift, (set(a) ^ set(b)) - drift

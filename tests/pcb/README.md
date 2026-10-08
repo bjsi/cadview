@@ -1,11 +1,11 @@
-# Conformance tests for the build123d -> KiCad board DSL (`cadview.pcb`, formerly `cadpcb.py`)
+# Conformance tests for the build123d -> KiCad board DSL (`openworkshop.pcb`, formerly `cadpcb.py`)
 
 The question these answer: **does what the DSL writes mean the same thing to KiCad, and does it reproduce real
 open-source boards?**  Every check goes through an independent reader (`kicad_parse.py`, written here, no code shared
 with the module) and through KiCad's own `kicad-cli`, with Gerbers / Excellon read back by `gerbonara`.
 
 Nothing in here is specific to the arenas repo: the module under test is found by path (see *Running*), the fixtures are
-self-contained, and the suite can be dropped into the cadview repo as `tests/` next to `cadview/pcb.py`.
+self-contained, and the suite can be dropped into the openworkshop repo as `tests/` next to `openworkshop/pcb.py`.
 
 ## Layout
 
@@ -27,7 +27,7 @@ self-contained, and the suite can be dropped into the cadview repo as `tests/` n
 
 ```bash
 pip install -e ".[pcb,dev]" build123d           # shapely, pytest, gerbonara; plus kicad-cli and the KiCad libraries on the box
-python -m pytest tests/pcb -q -ra               # from the cadview repo root (CI runs this job on ubuntu with KiCad 9)
+python -m pytest tests/pcb -q -ra               # from the openworkshop repo root (CI runs this job on ubuntu with KiCad 9)
 PCB_TEST_OUT=/tmp/pcb-dsl python -m pytest tests/pcb   # keep every board / Gerber / STEP / drc.json it produced
 ```
 
@@ -36,7 +36,7 @@ library on disk (`KICAD_FOOTPRINTS`, default `/usr/share/kicad/footprints`), and
 
 | env | meaning |
 |---|---|
-| `CADPCB_PATH` | the module file to test; otherwise `../cadpcb.py`, `../cadview/pcb.py`, then the installed `cadview/pcb.py` |
+| `CADPCB_PATH` | the module file to test; otherwise `../cadpcb.py`, `../openworkshop/pcb.py`, then the installed `openworkshop/pcb.py` |
 | `KICAD_CLI` | the binary (default `kicad-cli` on PATH) |
 | `KICAD_CLI_LD_LIBRARY_PATH` | a directory holding `libprotobuf.so.36` when the system's is older (the hub's partial Arch upgrade); `~/.claude/jobs/*/tmp/pb36/usr/lib` is tried automatically |
 | `PCB_TEST_OUT` | where to leave the outputs (default: pytest's tmp dir, printed in the summary) |
@@ -188,12 +188,12 @@ unmatched), and `read_outline` orders a line's endpoints with coordinates within
 Proven by the new boards (no gap): rotations off the 90 deg grid (pad positions AND sizes - the library tree is re-embedded, KiCad
 draws it), oval / slot drills, custom-primitive and trapezoid pads, castellated edge pads, arc outlines, `gr_rect` cutouts, Edge.Cuts
 chained across a 4 um step (`Wire.combine(tol=0.01)`, as KiCad does), footprint-level Edge.Cuts items, pad-less footprints, 100+
-footprints from 12-17 libraries, KiCad 6 / 7 `fp_text reference` footprints (the one `cadview/pcb.py` change: `kicad_pcb()` now
+footprints from 12-17 libraries, KiCad 6 / 7 `fp_text reference` footprints (the one `openworkshop/pcb.py` change: `kicad_pcb()` now
 rewrites `fp_text reference / value` as well as the KiCad 8+ properties, otherwise an older library's footprint keeps "REF**"),
 and parts on both sides (above).  By the second set: 437 footprints / 1639 pads on one board, V-cut and mouse-bite panels with
 duplicated references (same nets per copy), chamfered and odd-ratio roundrect pads, castellated oval pads with `(drill (offset))`,
 mask-only pads, `gr_poly` cutouts with 123 vertices, 22 `gr_circle` cutouts, NPTH-only mouse-bite footprints, oval NPTH slots
-(mozc's 216, through the drill table), user-named copper layers, KiCad 9 (20241229) files.  Two `cadview/pcb.py` fixes came out of it: the s-expression parser takes only plain decimals as
+(mozc's 216, through the drill table), user-named copper layers, KiCad 9 (20241229) files.  Two `openworkshop/pcb.py` fixes came out of it: the s-expression parser takes only plain decimals as
 numbers (hackrf's hex `(tedit 527E5841)` was read as inf and crashed the writer; section 1), and Edge.Cuts points are written at 6
 decimals (jumperless' 58 mm flat arcs lost 0.1 mm of centre at 4; section 6).  By the third set: a KiCad 5 file's footprints
 (re-embedded with their legacy syntax - bare layer names, `(width w)`, `fp_text`, hex `tedit` - which KiCad 10 reads in a
@@ -309,7 +309,7 @@ between two through vias.
 
 **7. Inner wires: NPTH drills vs Edge.Cuts cutouts** (`test_cutouts.py`): a Face with a circular and a slot-shaped inner wire.
 
-- `test_circle_inner_wire` — default `inner_circles="npth"`: the circle is one `cadview:NPTH` footprint at the CAD position
+- `test_circle_inner_wire` — default `inner_circles="npth"`: the circle is one `openworkshop:NPTH` footprint at the CAD position
   and no `gr_circle` (what every board written before the option existed got - the ordered nose-poke board's M2.5 clearance
   holes are such wires); `"cutout"`: a `gr_circle` and no drill.  The slot is 2 `gr_arc` + 2 `gr_line` either way, a closed
   chain `face_from_edge_cuts` rebuilds as one inner wire of the right area.
@@ -376,7 +376,7 @@ between two through vias.
 - **The 3D models**: the full STEP export is only checked to be larger than the board-only one (the models landed), not that
   each model sits at its pad.
 
-## Moving to the cadview repo
+## Moving to the openworkshop repo
 
-Copy this directory to `tests/` in bjsi/cadview; `conftest.py` then finds `../cadview/pcb.py` on its own.  The fixtures
+Copy this directory to `tests/` in bjsi/openworkshop; `conftest.py` then finds `../openworkshop/pcb.py` on its own.  The fixtures
 and `kicad_parse.py` have no arenas dependencies.  Add `pytest` + `gerbonara` to that repo's dev dependencies.

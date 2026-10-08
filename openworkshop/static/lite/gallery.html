@@ -1,13 +1,13 @@
 <!doctype html>
-<!-- cadview gallery: every scene on this server, thumbnail + search.
+<!-- openworkshop gallery: every scene on this server, thumbnail + search.
      Thumbnails are posted by viewer pages as scenes get viewed/rebuilt; a
      card without one loads its scene in a hidden frame to make it. Designs
-     from the project's cadview.json show as cards while they build. -->
+     from the project's openworkshop.json show as cards while they build. -->
 <html>
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>cadview</title>
+    <title>openworkshop</title>
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect x='2' y='2' width='12' height='12' rx='2' fill='%2388c0d0'/%3E%3C/svg%3E" />
     <style>
         html, body { margin: 0; background: #1b1f27; color: #d8dee9;
@@ -57,7 +57,7 @@
 </head>
 <body>
     <header>
-        <h1>cadview</h1>
+        <h1>openworkshop</h1>
         <input id="q" type="search" placeholder="search designs…" autofocus />
     </header>
     <div id="groups"></div>
@@ -194,7 +194,7 @@
             f.style.cssText = `position:fixed;left:-${w + 100}px;top:0;width:${w}px;height:${h}px;border:0;visibility:hidden`;
             f.src = "./" + encodeURIComponent(msg.name) + "?" + params;
             const done = (e) => {
-                if (e.data?.cadviewSnapDone !== msg.id) return;
+                if (e.data?.openworkshopSnapDone !== msg.id) return;
                 f.remove();
                 window.removeEventListener("message", done);
             };

@@ -277,7 +277,7 @@ def test_gerber_flashes_match_pad_xy(cadpcb, flashes, idx):
 # ---------------------------------------------------------------------------------------------- (d) ----
 def test_offset_rotated_custom_and_paste_only_pads_pico_smd(cadpcb, flashes):
     """the pads that are not 'just the anchor shape at the pad position' — `(drill (offset ..))`, custom pads rotated
-    inside their footprint, paste-only pads — come back as KiCad draws them (was a strict xfail; fixed in cadview.pcb)"""
+    inside their footprint, paste-only pads — come back as KiCad draws them (was a strict xfail; fixed in openworkshop.pcb)"""
     b, placed, fl = flashes
     lib_fp = _lib(cadpcb, PICO_SMD)
     p = next(p for ref, lib, name, p in placed if ref == f"F{PICO_SMD + 1}R0")

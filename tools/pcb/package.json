@@ -1,5 +1,5 @@
 {
-  "name": "cadview-pcb-export",
+  "name": "openworkshop-pcb-export",
   "private": true,
   "type": "module",
   "description": "npm packages tools/pcb/export.mjs needs (tscircuit Circuit JSON toolchain), versions as verified 2026-10-07",

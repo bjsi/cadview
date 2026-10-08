@@ -1,6 +1,6 @@
 <!doctype html>
 <!--
-cadview lite — the buildless, dependency-light viewer core.
+openworkshop lite — the buildless, dependency-light viewer core.
 Rules: (1) static artifact — plain ES modules + pinned vendored three.js,
 deployable on any static host; (2) progressive enhancement — a server adds
 live updates, without one this is still a full viewer; (3) install is a URL.
@@ -8,9 +8,9 @@ live updates, without one this is still a full viewer; (3) install is a URL.
 <html>
 <head>
     <meta charset="utf-8" />
-    <!--__CADVIEW_BASE__-->
+    <!--__OPENWORKSHOP_BASE__-->
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
-    <title>cadview lite</title>
+    <title>openworkshop lite</title>
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect x='2' y='2' width='12' height='12' rx='2' fill='%2388c0d0'/%3E%3C/svg%3E" />
     <script type="importmap">{ "imports": { "three": "./vendor/three.module.min.js" } }</script>
     <style>
@@ -256,7 +256,7 @@ live updates, without one this is still a full viewer; (3) install is a URL.
         // if the module never boots (no WebGL, embedded webview, blocked
         // modules), say so instead of sitting on "loading…" forever
         setTimeout(function () {
-            if (!window.cadviewLite) {
+            if (!window.openworkshopLite) {
                 window.__bootSend("watchdog", "module never booted; errs=" +
                     JSON.stringify(window.__bootErrs));
                 var el = document.getElementById("empty");

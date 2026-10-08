@@ -1,4 +1,4 @@
-# cadview — details
+# openworkshop — details
 
 ![mega desk in the viewer](ui.png)
 
@@ -7,7 +7,7 @@
 Import swap only — everything else stays the same:
 
 ```python
-from cadview import show      # was: from ocp_vscode import show
+from openworkshop import show      # was: from ocp_vscode import show
 show(scene)
 ```
 
@@ -15,7 +15,7 @@ Nested `Compound` trees with `.label` / `.color` (alpha = transparency) come
 through as the named part tree with per-part show/hide, colors and ghosting,
 exactly like ocp_vscode. `names=`, `colors=`, `alphas=` lists work; unknown
 ocp_vscode kwargs are accepted and ignored. `set_port()` / `set_host()` or
-`CADVIEW_PORT` / `CADVIEW_HOST` override the push target (default
+`OPENWORKSHOP_PORT` / `OPENWORKSHOP_HOST` override the push target (default
 `127.0.0.1:3941`).
 
 ## Revisions
@@ -43,11 +43,11 @@ The conventions that matter when authoring tracks programmatically:
   with baseline contact and rigid groups excluded — the same check as
   the viewer's ⚠, headless. Intended contact (a probe entering a port)
   will flag; everything else flagging is a choreography bug.
-- `cadview.Timeline` compiles phase-style calls into tracks if the
+- `openworkshop.Timeline` compiles phase-style calls into tracks if the
   parallel arrays get unwieldy (see its docstring).
 
-The MCP plugin exposes all of this as `cadview_parts` /
-`cadview_clearance` / `cadview_selection` tools.
+The MCP plugin exposes all of this as `openworkshop_parts` /
+`openworkshop_clearance` / `openworkshop_selection` tools.
 
 ## Faster iteration
 
@@ -62,7 +62,7 @@ For intentionally coarser previews:
 ```python
 show(scene, quality="preview")
 # Or for all subsequent calls in this process:
-from cadview import set_defaults
+from openworkshop import set_defaults
 set_defaults(quality="preview")
 ```
 
@@ -70,13 +70,13 @@ Preview uses deviation 0.4 / angular tolerance 0.4, versus standard 0.1 / 0.2.
 Explicit `deviation=` and `angular_tolerance=` still take precedence. Edge
 geometry remains available. `units="mm"` supplies a display label; it does not
 convert geometry. `show()` prints tessellation, encoding/compression and send/store times;
-browser-side timings sit on `cadviewLite.timings` in the page console.
+browser-side timings sit on `openworkshopLite.timings` in the page console.
 
 ## Architecture
 
-- `cadview/client.py`: ocp-tessellate conversion and gzipped JSON POST.
-- `cadview/server.py`: aiohttp, no CAD imports. Atomic per-project cache files
-  at `~/.local/share/cadview/scene-<project>.json.gz`; four prior snapshots in
+- `openworkshop/client.py`: ocp-tessellate conversion and gzipped JSON POST.
+- `openworkshop/server.py`: aiohttp, no CAD imports. Atomic per-project cache files
+  at `~/.local/share/openworkshop/scene-<project>.json.gz`; four prior snapshots in
   `history/<project>/`. Mutations are serialized, revisions are UUIDs, and
   failed persistence leaves the published scene intact. Existing caches migrate
   automatically on load.
@@ -95,7 +95,7 @@ browser-side timings sit on `cadviewLite.timings` in the page console.
   open tab hands-free.
 - **Agent surface**: `GET /api/selection` (what's selected in the viewer),
   `GET /api/parts` (world bboxes), `POST /api/clearance` (headless
-  collision replay) — all wrapped by the MCP plugin in `cadview/plugin/`.
+  collision replay) — all wrapped by the MCP plugin in `openworkshop/plugin/`.
 
 ## Validation
 
@@ -111,14 +111,14 @@ no live scenes touched.
 Run it under your service manager of choice; it's a single process:
 
 ```bash
-python -m cadview.server [--host H] [--port P]     # default 127.0.0.1:3941
+python -m openworkshop.server [--host H] [--port P]     # default 127.0.0.1:3941
 ```
 
-Deployment knobs are environment variables, all optional: `CADVIEW_PEERS`
-(extra allowed client IPs beyond loopback), `CADVIEW_CAD_PYTHON` (a separate
+Deployment knobs are environment variables, all optional: `OPENWORKSHOP_PEERS`
+(extra allowed client IPs beyond loopback), `OPENWORKSHOP_CAD_PYTHON` (a separate
 interpreter with the CAD stack, if the server runs CAD-free),
-`CADVIEW_RUN_ROOTS`, `CADVIEW_DATA`, `CADVIEW_DEVICE_LABELS`,
-`CADVIEW_HOME_ALIAS`, `CADVIEW_AUTOREG_PEERS`; `CADVIEW_TLS_CERT` /
-`CADVIEW_TLS_KEY` / `CADVIEW_TLS_PORT` add an HTTPS listener alongside
+`OPENWORKSHOP_RUN_ROOTS`, `OPENWORKSHOP_DATA`, `OPENWORKSHOP_DEVICE_LABELS`,
+`OPENWORKSHOP_HOME_ALIAS`, `OPENWORKSHOP_AUTOREG_PEERS`; `OPENWORKSHOP_TLS_CERT` /
+`OPENWORKSHOP_TLS_KEY` / `OPENWORKSHOP_TLS_PORT` add an HTTPS listener alongside
 HTTP (some embedded browsers only run scripts on secure origins — bring
 any cert: mkcert, LetsEncrypt, your mesh's tool).

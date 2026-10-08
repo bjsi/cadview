@@ -1,7 +1,7 @@
 """7. Inner wires: NPTH drills vs Edge.Cuts cutouts.
 
 A Face with a circular inner wire and a slot-shaped one.  By default (`inner_circles="npth"`) the circle is a non-plated
-drill - one `cadview:NPTH` footprint, no `gr_circle` - exactly what every board written before `inner_circles` existed got
+drill - one `openworkshop:NPTH` footprint, no `gr_circle` - exactly what every board written before `inner_circles` existed got
 (the ordered nose-poke board's M2.5 clearance holes are circular inner wires of its Face); with `"cutout"` it is a
 `gr_circle` on Edge.Cuts and no drill.  The slot is an Edge.Cuts cutout either way: its arcs and lines chain into a closed
 loop that the independent reader turns back into one inner wire of the same area.  `Board.hole()` adds an NPTH explicitly.
@@ -22,7 +22,7 @@ def _face():
 def _write(b, path):
     open(path, "w").write(b.kicad_pcb())
     tree = kp.parse(open(path).read())
-    npth = [c for c in tree if isinstance(c, list) and c and c[0] == "footprint" and str(c[1]).startswith("cadview:NPTH")]
+    npth = [c for c in tree if isinstance(c, list) and c and c[0] == "footprint" and str(c[1]).startswith("openworkshop:NPTH")]
     return kp.read_board(path), npth
 
 

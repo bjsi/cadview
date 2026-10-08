@@ -1,39 +1,39 @@
-# cadview MCP — the viewer, for agents
+# openworkshop MCP — the viewer, for agents
 
 Four stdio tools over plain MCP (no flags, works in the Claude Code
 desktop app and terminal alike):
 
-- **`cadview_selection`** — what the user has selected on the viewer page
+- **`openworkshop_selection`** — what the user has selected on the viewer page
   right now: parts/faces with world-space measurements and the camera.
   "Make these 5 mm taller" resolves through this.
-- **`cadview_parts`** — every part/group in a scene with world bbox,
+- **`openworkshop_parts`** — every part/group in a scene with world bbox,
   center and size: the anchors for writing animation tracks without
   reading model source.
-- **`cadview_clearance`** — replay animation tracks (or a pushed clip)
+- **`openworkshop_clearance`** — replay animation tracks (or a pushed clip)
   against the scene's AABBs and get NEW collisions back, baseline contact
   and rigid groups excluded. Author, verify, then show the human.
-- **`cadview_scenes`** — what's on the server.
+- **`openworkshop_scenes`** — what's on the server.
 
 ## Wiring
 
-`.mcp.json` in the project you run Claude Code from — with cadview
+`.mcp.json` in the project you run Claude Code from — with openworkshop
 installed as a package (any venv/uv layout):
 
 ```json
 {
     "mcpServers": {
-        "cadview": {
+        "openworkshop": {
             "command": "uv",
-            "args": ["run", "python", "-m", "cadview.mcp"]
+            "args": ["run", "python", "-m", "openworkshop.mcp"]
         }
     }
 }
 ```
 
-(Or `"command": "node", "args": ["/path/to/cadview/cadview/plugin/server.mjs"]`
+(Or `"command": "node", "args": ["/path/to/openworkshop/openworkshop/plugin/server.mjs"]`
 from a checkout. Needs node on PATH either way.)
 
-`CADVIEW_URL` defaults to `http://127.0.0.1:3941`; `CADVIEW_PROJECT`
+`OPENWORKSHOP_URL` defaults to `http://127.0.0.1:3941`; `OPENWORKSHOP_PROJECT`
 defaults to the directory Claude was launched from, which matches the
 default scene name of scripts pushed from there. Agents without MCP can
 hit the HTTP endpoints directly (`/api/selection`, `/api/parts`,

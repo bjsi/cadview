@@ -1,6 +1,6 @@
-"""cadview demo: a cabinet with a sliding drawer.
+"""openworkshop demo: a cabinet with a sliding drawer.
 
-    python -m cadview.server          # in another terminal (or your agent's)
+    python -m openworkshop.server          # in another terminal (or your agent's)
     python examples/demo.py           # pushes scene "demo" -> open /demo
 
 Shows the basics: a labelled/coloured part tree, a part grouped at its
@@ -13,7 +13,7 @@ import os
 
 from build123d import Align, Box, Color, Compound, Cylinder, Pos, Rot
 
-os.environ.setdefault("CADVIEW_SCENE", "demo")
+os.environ.setdefault("OPENWORKSHOP_SCENE", "demo")
 
 UP = (Align.CENTER, Align.CENTER, Align.MIN)
 
@@ -48,7 +48,7 @@ CYCLE = [("drawer (slides)", "tx", [0, 0.6, 2.0, 3.4, 4.6, 5.2], [0, 0, 85, 85, 
 PEEK = [("drawer (slides)", "tx", [0, 0.4, 1.1, 1.8, 2.3], [0, 0, 28, 0, 0])]
 
 if __name__ == "__main__":
-    from cadview import show
+    from openworkshop import show
     show(build(),
          title="Sliding drawer (demo)",
          animation=[{"name": "open & close", "tracks": CYCLE},

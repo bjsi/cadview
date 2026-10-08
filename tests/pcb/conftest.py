@@ -1,8 +1,8 @@
 """Shared fixtures: the module under test (loaded by path), a serialised kicad-cli runner, and an output directory
 the tests leave their boards / Gerbers / reports in.
 
-The module is found, in order: $CADPCB_PATH, `../cadpcb.py` (next to this tests/ dir), `../cadview/pcb.py` (the
-cadview repo layout), then the installed `cadview` package's `pcb.py`.  It is loaded from its file so the same tests
+The module is found, in order: $CADPCB_PATH, `../cadpcb.py` (next to this tests/ dir), `../openworkshop/pcb.py` (the
+openworkshop repo layout), then the installed `openworkshop` package's `pcb.py`.  It is loaded from its file so the same tests
 run unchanged wherever the module lives.
 
 kicad-cli: $KICAD_CLI (default: `kicad-cli` on PATH).  If the binary fails to start because of a missing
@@ -33,10 +33,10 @@ def _module_candidates():
     if env:
         yield pathlib.Path(env)
     yield HERE.parent / "cadpcb.py"
-    yield HERE.parent / "cadview" / "pcb.py"
-    yield HERE.parent.parent / "cadview" / "pcb.py"      # the cadview repo layout: tests/pcb/ under the repo root
+    yield HERE.parent / "openworkshop" / "pcb.py"
+    yield HERE.parent.parent / "openworkshop" / "pcb.py"      # the openworkshop repo layout: tests/pcb/ under the repo root
     try:
-        spec = importlib.util.find_spec("cadview")
+        spec = importlib.util.find_spec("openworkshop")
     except (ImportError, ValueError):
         spec = None
     if spec and spec.submodule_search_locations:
@@ -53,7 +53,7 @@ def load_cadpcb():
             spec.loader.exec_module(mod)
             mod.__test_path__ = str(p)
             return mod
-    raise RuntimeError("cadpcb.py / cadview/pcb.py not found: set CADPCB_PATH")
+    raise RuntimeError("cadpcb.py / openworkshop/pcb.py not found: set CADPCB_PATH")
 
 
 @pytest.fixture(scope="session")

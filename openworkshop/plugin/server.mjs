@@ -1,27 +1,27 @@
 #!/usr/bin/env node
-// cadview MCP server (zero-dep, stdio): lets any Claude Code session —
-// terminal OR desktop app — read what's currently selected in a cadview
+// openworkshop MCP server (zero-dep, stdio): lets any Claude Code session —
+// terminal OR desktop app — read what's currently selected in a openworkshop
 // viewer page. Plain MCP, no channels preview, no flags: the viewer
-// streams its selection to the cadview server, this tool pulls it.
+// streams its selection to the openworkshop server, this tool pulls it.
 //
 // Config via env (plugin user_config maps onto these):
-//   CADVIEW_URL      default http://127.0.0.1:3941
-//   CADVIEW_PROJECT  default project for the tools (else cwd dir name,
+//   OPENWORKSHOP_URL      default http://127.0.0.1:3941
+//   OPENWORKSHOP_PROJECT  default project for the tools (else cwd dir name,
 //                    which matches the default scene name of scripts run
 //                    from that directory)
 
 import { basename } from "node:path";
 
-const URL_BASE = (process.env.CADVIEW_URL || "http://127.0.0.1:3941").replace(/\/+$/, "");
-const DEFAULT_PROJECT = process.env.CADVIEW_PROJECT || basename(process.cwd());
+const URL_BASE = (process.env.OPENWORKSHOP_URL || "http://127.0.0.1:3941").replace(/\/+$/, "");
+const DEFAULT_PROJECT = process.env.OPENWORKSHOP_PROJECT || basename(process.cwd());
 
 const out = (msg) => process.stdout.write(JSON.stringify(msg) + "\n");
 const reply = (id, result) => out({ jsonrpc: "2.0", id, result });
 
 const TOOLS = [
     {
-        name: "cadview_selection",
-        description: "What the user currently has selected in the cadview viewer for a project: " +
+        name: "openworkshop_selection",
+        description: "What the user currently has selected in the openworkshop viewer for a project: " +
             "parts/faces with world-space measurements (mm), plus his camera. Call this when he " +
             "say things like 'these should be longer' or 'the selected face' — the selection IS " +
             "the referent. Empty selection + old updated_at means nothing is selected right now.",
@@ -30,18 +30,18 @@ const TOOLS = [
             properties: {
                 project: {
                     type: "string",
-                    description: `cadview project/scene name (default: ${DEFAULT_PROJECT})`,
+                    description: `openworkshop project/scene name (default: ${DEFAULT_PROJECT})`,
                 },
             },
         },
     },
     {
-        name: "cadview_scenes",
-        description: "List the scenes on the cadview server (project slug, display title, last push time).",
+        name: "openworkshop_scenes",
+        description: "List the scenes on the openworkshop server (project slug, display title, last push time).",
         inputSchema: { type: "object", properties: {} },
     },
     {
-        name: "cadview_parts",
+        name: "openworkshop_parts",
         description: "Every part/group in a scene with its world-space bbox, center and size (mm) — " +
             "the anchors for writing animation tracks or resolving a part by name without reading model source.",
         inputSchema: {
@@ -50,9 +50,9 @@ const TOOLS = [
         },
     },
     {
-        name: "cadview_snapshot",
+        name: "openworkshop_snapshot",
         description: "A rendered PNG of a scene straight from the viewer, WITHOUT touching the page the user " +
-            "is looking at (it renders in a hidden frame of an open cadview page). Use it to look at a design " +
+            "is looking at (it renders in a hidden frame of an open openworkshop page). Use it to look at a design " +
             "or check your own change — never navigate the user's browser pane for that. view: iso (default) | " +
             "top | bottom | front | back | left | right; focus: part id/label/path suffix to frame (comma list); " +
             "hide / only: parts to hide / keep (same selectors); zoom: >1 closer; for animated scenes clip + t " +
@@ -73,7 +73,7 @@ const TOOLS = [
         },
     },
     {
-        name: "cadview_clearance",
+        name: "openworkshop_clearance",
         description: "Replay animation tracks against the scene's coarse AABBs and report NEW collisions " +
             "(pairs already touching at rest are baseline; parts moving rigidly together are skipped). " +
             "Verify choreography you just authored: pass tracks [[selector, action, times, values], ...], " +
@@ -91,44 +91,44 @@ const TOOLS = [
 ];
 
 async function callTool(name, args) {
-    if (name === "cadview_selection") {
+    if (name === "openworkshop_selection") {
         const project = args.project || DEFAULT_PROJECT;
         const resp = await fetch(`${URL_BASE}/api/selection?name=${encodeURIComponent(project)}`,
                                  { signal: AbortSignal.timeout(10000) });
-        if (!resp.ok) throw new Error("cadview server said HTTP " + resp.status);
+        if (!resp.ok) throw new Error("openworkshop server said HTTP " + resp.status);
         return JSON.stringify(await resp.json(), null, 1);
     }
-    if (name === "cadview_scenes") {
+    if (name === "openworkshop_scenes") {
         const resp = await fetch(`${URL_BASE}/api/runnable`, { signal: AbortSignal.timeout(10000) });
-        if (!resp.ok) throw new Error("cadview server said HTTP " + resp.status);
+        if (!resp.ok) throw new Error("openworkshop server said HTTP " + resp.status);
         const rows = (await resp.json()).projects || [];
         return rows.map((r) => `${r.project}  ${r.title || r.name || ""}  (${r.received_at || "?"})`).join("\n");
     }
-    if (name === "cadview_parts") {
+    if (name === "openworkshop_parts") {
         const project = args.project || DEFAULT_PROJECT;
         const resp = await fetch(`${URL_BASE}/api/parts?name=${encodeURIComponent(project)}`,
                                  { signal: AbortSignal.timeout(20000) });
-        if (!resp.ok) throw new Error("cadview server said HTTP " + resp.status);
+        if (!resp.ok) throw new Error("openworkshop server said HTTP " + resp.status);
         return JSON.stringify(await resp.json(), null, 1);
     }
-    if (name === "cadview_snapshot") {
+    if (name === "openworkshop_snapshot") {
         const project = args.project || DEFAULT_PROJECT;
         const q = new URLSearchParams({ name: project });
         for (const k of ["view", "focus", "hide", "only", "zoom", "yaw", "t", "clip", "chapter", "clearance", "w", "h"])
             if (args[k] != null && args[k] !== "") q.set(k, String(args[k]));
         const resp = await fetch(`${URL_BASE}/api/snapshot?${q}`, { signal: AbortSignal.timeout(70000) });
-        if (!resp.ok) throw new Error("cadview server said HTTP " + resp.status + ": " + await resp.text());
+        if (!resp.ok) throw new Error("openworkshop server said HTTP " + resp.status + ": " + await resp.text());
         const data = Buffer.from(await resp.arrayBuffer()).toString("base64");
         return [{ type: "image", data, mimeType: "image/png" },
                 { type: "text", text: `${project} — ${args.view || "iso"}${args.focus ? " focus " + args.focus : ""}` }];
     }
-    if (name === "cadview_clearance") {
+    if (name === "openworkshop_clearance") {
         const body = { ...args, project: args.project || DEFAULT_PROJECT };
         const resp = await fetch(`${URL_BASE}/api/clearance`, {
             method: "POST", headers: { "Content-Type": "application/json" },
             body: JSON.stringify(body), signal: AbortSignal.timeout(60000),
         });
-        if (!resp.ok) throw new Error("cadview server said HTTP " + resp.status + ": " + await resp.text());
+        if (!resp.ok) throw new Error("openworkshop server said HTTP " + resp.status + ": " + await resp.text());
         return JSON.stringify(await resp.json(), null, 1);
     }
     throw new Error("unknown tool " + name);
@@ -154,14 +154,14 @@ async function handle(msg) {
         reply(id, {
             protocolVersion: params?.protocolVersion || "2024-11-05",
             capabilities: { tools: {} },
-            serverInfo: { name: "cadview", version: "0.2.0" },
+            serverInfo: { name: "openworkshop", version: "0.3.0" },
             instructions:
-                "cadview viewer bridge. When the user refers to geometry deictically " +
-                "('this face', 'these parts', 'the selected one'), call cadview_selection — " +
-                "they picked the referent in the 3D viewer. cadview_parts gives every part's " +
+                "openworkshop viewer bridge. When the user refers to geometry deictically " +
+                "('this face', 'these parts', 'the selected one'), call openworkshop_selection — " +
+                "they picked the referent in the 3D viewer. openworkshop_parts gives every part's " +
                 "world bbox (anchors for animation tracks); after authoring tracks, verify " +
-                "them with cadview_clearance. To LOOK at a design or your change, call " +
-                "cadview_snapshot — it renders off-screen; never navigate the user's browser " +
+                "them with openworkshop_clearance. To LOOK at a design or your change, call " +
+                "openworkshop_snapshot — it renders off-screen; never navigate the user's browser " +
                 "pane to check your own work. Measurements are world-space mm.",
         });
     } else if (method === "tools/list") {

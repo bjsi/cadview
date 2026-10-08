@@ -1,4 +1,4 @@
-# cadview
+# openworkshop
 
 Live browser viewer for [build123d](https://github.com/gumyr/build123d) /
 CadQuery — a drop-in `show()` for OCP CAD Viewer / ocp_vscode users, with
@@ -25,15 +25,15 @@ animation, a gallery, an agent's eyes and a board layout layer.
 ## Install
 
 ```bash
-git clone https://github.com/bjsi/cadview && cd cadview
+git clone https://github.com/bjsi/openworkshop && cd openworkshop
 pip install -e . build123d
-python -m cadview.server            # http://127.0.0.1:3941
+python -m openworkshop.server            # http://127.0.0.1:3941
 ```
 
 ## Use
 
 ```python
-from cadview import show            # was: from ocp_vscode import show
+from openworkshop import show       # was: from ocp_vscode import show
 show(model)                         # nested Compound labels/colors -> part tree
 ```
 
@@ -42,7 +42,7 @@ script ran from). Click parts or faces to select, alt-click for the whole
 part, two selections measure the distance between them, double-click
 finds a part in the tree.
 
-Try it without installing: **[bjsi.github.io/cadview](https://bjsi.github.io/cadview/)**.
+Try it without installing: **[bjsi.github.io/openworkshop](https://bjsi.github.io/openworkshop/)**.
 Locally, `python examples/mega_desk.py` (a 2 m workbench, ~50 parts) and
 `python examples/gantry.py` (an XY gantry with a stacked Z and gripper)
 fill `http://127.0.0.1:3941/`.
@@ -92,27 +92,27 @@ add the selection tool to `.mcp.json`:
 
 ```json
 { "version": "0.0.1", "configurations": [
-    { "name": "cadview", "runtimeExecutable": "python", "runtimeArgs": ["-m", "cadview.server"],
+    { "name": "openworkshop", "runtimeExecutable": "python", "runtimeArgs": ["-m", "openworkshop.server"],
       "port": 3941, "autoPort": false } ] }
 ```
 
 ```json
-{ "mcpServers": { "cadview": { "command": "python", "args": ["-m", "cadview.mcp"] } } }
+{ "mcpServers": { "openworkshop": { "command": "python", "args": ["-m", "openworkshop.mcp"] } } }
 ```
 
 Select geometry on the page and say "make these 5 mm taller": the agent's
-`cadview_selection` tool returns exactly what you picked, with
-measurements. `cadview_snapshot` (or `GET /api/snapshot?name=<project>
+`openworkshop_selection` tool returns exactly what you picked, with
+measurements. `openworkshop_snapshot` (or `GET /api/snapshot?name=<project>
 &view=top&focus=<part>&t=<s>`) returns a PNG rendered in a hidden frame
-of whatever cadview page is open, so the agent checks its own work and
+of whatever openworkshop page is open, so the agent checks its own work and
 the page you are looking at never changes.
 
 ## Boards
 
-![a real Pico board (the 12 V stepper playground, MIT) laid out again through cadview.pcb and shown with its parts' STEP models](docs/board.png)
+![a real Pico board (the 12 V stepper playground, MIT) laid out again through openworkshop.pcb and shown with its parts' STEP models](docs/board.png)
 
 ```python
-from cadview.pcb import Board, kicad_footprint
+from openworkshop.pcb import Board, kicad_footprint
 
 b = Board(outline_face, thickness=1.6)               # outline + holes straight off a build123d Face
 for ref, (lib, name), at, rot, value in PARTS:        # ("U1", ("Package_TO_SOT_THT", "TO-220-3_Vertical"), (77.5, 22), 270, "LM7805")
@@ -136,15 +136,15 @@ the enclosure while you design both. The picture is
 [stepper playground](https://github.com/jhmcaleely/stepper-playground) (MIT)
 re-expressed as seventeen placements and 41 nets; the layer is proven
 Gerber for Gerber against 27 open-source KiCad boards (`tests/pcb`).
-`pip install cadview[pcb]`; needs KiCad's libraries on disk
+`pip install openworkshop[pcb]`; needs KiCad's libraries on disk
 (`KICAD_FOOTPRINTS`, `KICAD_SYMBOLS`, `KICAD_3DMODELS`).
 
 ## Review pages
 
-`python -m cadview.bake --single-file out/` writes one self-contained
+`python -m openworkshop.bake --single-file out/` writes one self-contained
 `<scene>.html` per scene with full orbit, part tree, measure and
 animation — opens from a file or an attachment. `--changed-vs
-cadview-scenes.tar.gz` keeps only the scenes a PR changed; without
+openworkshop-scenes.tar.gz` keeps only the scenes a PR changed; without
 `--single-file` it bakes a static multi-scene site (the demo site is one).
 
 ## More
