@@ -34,7 +34,7 @@ from pathlib import Path
 
 from openworkshop.bake import get, scene_message
 
-_DUP = re.compile(r"\(\d+\)$")      # "bracket(2)" -> "bracket"
+_DUP = re.compile(r"(?<! )\(\d+\)$")      # the viewer's duplicate suffix "bracket(2)" -> "bracket"; "M6 T-nut (3030)" is a name
 
 
 def leaves(shapes):

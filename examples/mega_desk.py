@@ -55,8 +55,24 @@ def rail(length):
     return extrude(PROFILE, amount=length)      # along +Z from z=0
 
 
-def bracket():
-    return Box(28, 28, 28, align=UP) - Pos(8, 8, 8) * Box(28, 28, 28, align=UP)
+def brackets_and_hardware():
+    """A 3030 corner bracket inside each leg under its long rail, each held by two
+    M6×12 socket screws into T-nuts — real parts from openworkshop.hardware, so the
+    build guide counts them ("8 × M6×12 socket screw") without a note."""
+    from openworkshop.hardware import corner_bracket, fasten, screw, t_nut
+    T, P = 3.0, PROF
+    brackets, hardware = [], []
+    for sx in (-1, 1):
+        for sy in (-1, 1):
+            face = sx * (LEG_X - P / 2)                              # the leg's inner face
+            under = TOP_FRAME_Z - P / 2 + (TOP_T if sy > 0 else 0)   # the long rail's underside
+            flip = Rot(180, 0, 0) if sx < 0 else Rot(0, 180, 0)      # legs along +X/+Z -> into the corner
+            brackets.append(part(Pos(face, sy * LEG_Y, under) * flip * corner_bracket("3030", T), "3030 corner bracket", GREY))
+            hardware.append(fasten(screw("M6", 12), t_nut("M6", "3030"), grip=T,
+                                   at=(face + sx * 0.6 * P, sy * LEG_Y, under - T), axis=(0, 0, 1)))        # up into the rail
+            hardware.append(fasten(screw("M6", 12), t_nut("M6", "3030"), grip=T,
+                                   at=(face + sx * T, sy * LEG_Y, under - 0.6 * P), axis=(-sx, 0, 0)))     # into the leg
+    return brackets, Compound(children=hardware, label="frame hardware")
 
 
 def desk():
@@ -73,10 +89,8 @@ def desk():
     for sx in (-1, 1):
         parts.append(part(Pos(sx * LEG_X, -CROSS_LEN / 2, PROF / 2) * Rot(-90, 0, 0) * rail(CROSS_LEN),
                           f"foot rail {'left' if sx < 0 else 'right'}", ALU))
-    for sx in (-1, 1):
-        for sy in (-1, 1):
-            parts.append(part(Pos(sx * (LEG_X - PROF / 2 - 14), sy * LEG_Y, (BACK_LEG_LEN if sy > 0 else LEG_LEN) - 28) * bracket(),
-                              "bracket", GREY))
+    brackets, hardware = brackets_and_hardware()
+    parts += brackets + [hardware]
     parts.append(part(Pos(0, -PROF / 2, TOP_Z + TOP_T / 2) * Box(DESK_L, DESK_W - PROF, TOP_T), "MDF top", MDF))
     return Compound(children=parts, label="desk")
 
@@ -154,8 +168,9 @@ def assembly():
     phases = [
         ("legs", ["leg front left", "leg front right", "leg back left", "leg back right",
                   "foot rail left", "foot rail right"], {"view": "iso", "zoom": 1.0}),
-        ("frame", ["long rail front", "long rail back", "cross rail left", "cross rail centre",
-                   "cross rail right", "bracket", "bracket(2)", "bracket(3)", "bracket(4)"], None),
+        ("frame", ["long rail front", "long rail back", "cross rail left", "cross rail centre", "cross rail right",
+                   "3030 corner bracket", "3030 corner bracket(2)", "3030 corner bracket(3)", "3030 corner bracket(4)",
+                   "frame hardware"], None),
         ("top", ["MDF top"], None),
         ("uprights", ["upright x=-950", "upright x=+0", "upright x=+950", "pegboard left", "pegboard right"],
          {"view": "front", "zoom": 1.1}),

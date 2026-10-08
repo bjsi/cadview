@@ -101,6 +101,13 @@ one step per page — the mega desk's is
 [here](https://bjsi.github.io/openworkshop/mega-desk-guide.html). An
 agent that invented the sequence writes the notes too.
 
+Fasteners come from the model, not the notes: `openworkshop.hardware`
+makes ISO-sized screws (socket, button, countersunk), nuts, washers,
+T-nuts, heat-set inserts and extrusion corner brackets as labelled parts,
+and `fasten(screw("M6", 12), t_nut("M6", "3030"), at=…, axis=…, grip=3)`
+puts a screw and its mate on a joint — so the step's list says
+"8 × M6×12 socket screw, 8 × M6 T-nut (3030)" because they are there.
+
 ## With Claude Code
 
 Make the viewer the project's preview server (`.claude/launch.json`) and

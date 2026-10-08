@@ -8,8 +8,8 @@
       "tools": ["5 mm hex key"]
     },
     "frame": {
-      "note": "Front long rail flush with the top of the front legs; back long rail one MDF thickness higher. Cross rails sit on the front rail at the leg lines and the centre. A bracket goes inside each leg under the long rails.",
-      "fasteners": ["16 × M6×12 + T-nut (rails)", "8 × M6×12 + T-nut (brackets)"],
+      "note": "Front long rail flush with the top of the front legs; back long rail one MDF thickness higher. Cross rails sit on the front rail at the leg lines and the centre. A corner bracket goes inside each leg under the long rail: one screw up into the rail, one into the leg (the screws and T-nuts are in the model, so the list above counts them).",
+      "fasteners": ["16 × M6×12 + T-nut (rails to cross rails)"],
       "tools": ["5 mm hex key", "square"]
     },
     "top": {
