@@ -240,6 +240,22 @@ def show(*cad_objs, names=None, colors=None, alphas=None, **kwargs):
                       "speed": speed}]
         message["animations"] = clips
 
+    # routes: how each part type gets made — {label or glob: ["print", "cnc"]},
+    # several allowed, the first is the default; the build guide's kit page
+    # and `openworkshop.kit` group parts by it. Keys match a part's label with
+    # the viewer's duplicate suffix stripped ("bracket(2)" -> "bracket").
+    routes = kwargs.get("routes")
+    if routes:
+        if not isinstance(routes, dict):
+            raise ValueError("routes: {label or glob: [route, ...]}")
+        norm = {}
+        for label, rs in routes.items():
+            rs = [rs] if isinstance(rs, str) else list(rs)
+            if not rs or not all(isinstance(r, str) and r for r in rs):
+                raise ValueError(f"routes[{label!r}]: a route name or a list of them")
+            norm[str(label)] = [r.lower() for r in rs]
+        message["routes"] = norm
+
     body = gzip.compress(json.dumps(message).encode(), compresslevel=3)
     t_encoded = time.perf_counter()
     url = get_url()

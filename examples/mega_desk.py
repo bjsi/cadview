@@ -191,5 +191,11 @@ def assembly():
 
 if __name__ == "__main__":
     from openworkshop import show
-    show(build(), title="Mega desk", animation=[assembly(),
-                                                {"name": "shelf: one pitch up", "tracks": SHELF_PITCH}])
+    # how each part type gets made (several routes allowed, the first is the default);
+    # the hardware library's parts are "buy" by themselves
+    ROUTES = {"leg *": ["cut"], "* rail *": ["cut"], "upright *": ["cut"],       # extrusion cut to length
+              "MDF top": ["cnc"], "shelf board (MFC)": ["cnc"], "pegboard *": ["cnc", "buy"],
+              "shelf bracket (printed)": ["print"], "gridfinity bin *": ["print", "buy"],
+              "ceiling (*)": ["context"]}
+    show(build(), title="Mega desk", routes=ROUTES,
+         animation=[assembly(), {"name": "shelf: one pitch up", "tracks": SHELF_PITCH}])

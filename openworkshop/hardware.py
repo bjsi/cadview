@@ -150,4 +150,8 @@ def bom(*parts):
     return out
 
 
-__all__ = ["screw", "nut", "washer", "t_nut", "heat_set_insert", "corner_bracket", "fasten", "bom"]
+# what this library's parts are by default: bought (a corner bracket can also be
+# printed, so it says both). A show(routes=...) entry for the same label wins.
+from openworkshop.guide import HARDWARE_ROUTES as DEFAULT_ROUTES  # noqa: E402
+
+__all__ = ["screw", "nut", "washer", "t_nut", "heat_set_insert", "corner_bracket", "fasten", "bom", "DEFAULT_ROUTES"]

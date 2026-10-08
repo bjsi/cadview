@@ -1,7 +1,7 @@
 """Build guide — the assembly clip's chapters as IKEA-style step pages.
 
     python -m openworkshop.guide <scene> [-o guide.html] [--clip NAME] [--notes guide.json]
-                                 [--url http://127.0.0.1:3941] [--size 900x600]
+                                 [--kit DIR] [--url http://127.0.0.1:3941] [--size 900x600]
 
 A clip with chapters is a build order: each chapter is a step, and the parts
 whose tracks change inside the step (a `vis` 0 -> 1, a move that starts) are
@@ -21,6 +21,14 @@ Notes file (optional JSON; keys are chapter names):
 Parts that never move in the clip are treated as present from the start.
 Needs only a running server with an open page (the snapshot route renders in
 a hidden frame of it) — no CAD stack.
+
+Routes: `show(..., routes={"MDF top": ["cnc"], "3030 corner bracket": ["buy", "print"],
+"gridfinity bin *": "print"})` says how each part type gets made (several
+allowed, the first is the default; keys are labels or globs). The kit page
+groups the parts by route, and `--kit DIR` writes DIR/kit.json plus an STL
+per part type to print or cut, straight from the scene's mesh. Parts from
+openworkshop.hardware are "buy" unless the routes say otherwise; a part
+with no route is listed as unrouted, which is the question to answer.
 """
 import argparse
 import base64
@@ -32,7 +40,15 @@ import sys
 import urllib.parse
 from pathlib import Path
 
-from openworkshop.bake import get, scene_message
+from fnmatch import fnmatchcase
+
+from openworkshop.bake import _numbers, get, scene_message
+
+# openworkshop.hardware's parts, by label pattern — bought unless the scene says otherwise
+HARDWARE_ROUTES = {"M* screw": ["buy"], "M* hex nut": ["buy"], "M* washer": ["buy"], "M* T-nut (*)": ["buy"],
+                   "M* heat-set insert": ["buy"], "* corner bracket": ["buy", "print"]}
+ROUTE_ORDER = ("print", "cnc", "cut", "laser", "pcb", "buy")
+NO_FILE = ("buy", "context", "unrouted")        # routes the kit writes no geometry for
 
 _DUP = re.compile(r"(?<! )\(\d+\)$")      # the viewer's duplicate suffix "bracket(2)" -> "bracket"; "M6 T-nut (3030)" is a name
 
@@ -109,6 +125,92 @@ def steps_of(msg, clip_name=None):
     return clip["name"], steps, static, names
 
 
+def route_for(label, routes):
+    """[routes] for a part type: an exact key, else the first glob that matches, else the hardware
+    defaults; None when nothing says."""
+    as_list = lambda rs: [rs] if isinstance(rs, str) else list(rs)
+    for table in (routes or {}, HARDWARE_ROUTES):
+        if label in table:
+            return as_list(table[label])
+        for pat, rs in table.items():
+            if fnmatchcase(label, pat):
+                return as_list(rs)
+    return None
+
+
+def kit(steps, names, routes):
+    """[{route, label, count, also}] — every moving part type grouped by its default route,
+    make-routes first, 'unrouted' last."""
+    rows = []
+    for n, label in counted([p for s in steps for p in s["parts"]], names):
+        rs = route_for(label, routes)
+        rows.append({"route": rs[0] if rs else "unrouted", "label": label, "count": n, "also": rs[1:] if rs else []})
+    rank = lambda r: (ROUTE_ORDER.index(r["route"]) if r["route"] in ROUTE_ORDER else len(ROUTE_ORDER) + (r["route"] == "unrouted"), r["route"])
+    return sorted(rows, key=rank)
+
+
+def mesh_of(msg, leaf_id):
+    """(vertices [[x,y,z]...], triangles [[a,b,c]...]) of a leaf, in its own frame — for an STL of the part type."""
+    data = msg["data"]
+    instances = data.get("instances") or []
+
+    def find(node):
+        if "parts" in node:
+            for c in node["parts"]:
+                r = find(c)
+                if r:
+                    return r
+            return None
+        return node if (node.get("id") or node.get("name")) == leaf_id else None
+
+    node = find(data["shapes"])
+    shape = node.get("shape") if node else None
+    inst = instances[shape["ref"]] if isinstance(shape, dict) and isinstance(shape.get("ref"), int) else shape
+    if not isinstance(inst, dict) or "vertices" not in inst:
+        return None
+    v = _numbers(inst["vertices"]); t = _numbers(inst["triangles"])
+    return [v[i:i + 3] for i in range(0, len(v) - 2, 3)], [t[i:i + 3] for i in range(0, len(t) - 2, 3)]
+
+
+def write_stl(path, verts, tris, name="part"):
+    """Binary STL (mm) from a tessellated mesh; normals from the winding."""
+    import struct
+    out = bytearray(struct.pack("<80sI", name.encode("ascii", "replace")[:80], len(tris)))
+    for a, b, c in tris:
+        p, q, r = verts[a], verts[b], verts[c]
+        u = [q[k] - p[k] for k in range(3)]; w = [r[k] - p[k] for k in range(3)]
+        n = [u[1] * w[2] - u[2] * w[1], u[2] * w[0] - u[0] * w[2], u[0] * w[1] - u[1] * w[0]]
+        l = (n[0] ** 2 + n[1] ** 2 + n[2] ** 2) ** 0.5 or 1.0
+        out += struct.pack("<12fH", n[0] / l, n[1] / l, n[2] / l, *p, *q, *r, 0)
+    Path(path).write_bytes(out)
+
+
+def write_kit(outdir, msg, steps, names, routes):
+    """DIR/kit.json + DIR/<route>/<label>.stl for every part type that is made (not bought)."""
+    out = Path(outdir); out.mkdir(parents=True, exist_ok=True)
+    rows = kit(steps, names, routes)
+    first = {}
+    for s in steps:
+        for p in s["parts"]:
+            first.setdefault(_DUP.sub("", names.get(p, p)).strip(), p)
+    for r in rows:
+        if r["route"] in NO_FILE:
+            continue
+        mesh = mesh_of(msg, first[r["label"]])
+        if not mesh:
+            continue
+        safe = re.sub(r"[^\w.-]+", "_", r["label"]).strip("_")
+        (out / r["route"]).mkdir(exist_ok=True)
+        write_stl(out / r["route"] / f"{safe}.stl", *mesh, name=r["label"])
+        r["file"] = f"{r['route']}/{safe}.stl"
+    (out / "kit.json").write_text(json.dumps({"scene": msg.get("meta", {}).get("project"), "parts": rows}, indent=1, ensure_ascii=False))
+    by = {}
+    for r in rows:
+        by[r["route"]] = by.get(r["route"], 0) + r["count"]
+    print("kit: " + ", ".join(f"{n} to {r}" if r != "unrouted" else f"{n} unrouted" for r, n in by.items()), file=sys.stderr)
+    return rows
+
+
 def counted(ids, names):
     """[(count, display name)] — duplicates of one label counted together, in first-seen order."""
     out, order = {}, []
@@ -161,6 +263,8 @@ section.step img { width: 100%; border-radius: 10px; border: 1px solid var(--lin
 section.kit table { width: 100%; border-collapse: collapse; margin-top: 8px; }
 section.kit td { padding: 6px 4px; border-top: 1px solid var(--line); }
 section.kit td:first-child { width: 3em; color: var(--accent); font-weight: 700; text-align: right; padding-right: 12px; }
+section.kit tr.route td { border-top: 0; padding-top: 14px; font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+section.kit td small { color: var(--muted); }
 nav { position: fixed; left: 0; right: 0; bottom: 0; display: flex; gap: 10px; padding: 12px 16px calc(12px + env(safe-area-inset-bottom)); background: var(--bg); border-top: 1px solid var(--line); }
 nav button { flex: 1; font: inherit; font-size: 20px; font-weight: 600; padding: 14px; border-radius: 12px; border: 1px solid var(--line); background: #f9fafb; color: var(--ink); }
 nav button.next { background: var(--ink); color: #fff; border-color: var(--ink); }
@@ -186,12 +290,19 @@ show(i);
 """
 
 
-def build_html(title, intro, clip, steps, static, names, images, notes, scene_url):
+def build_html(title, intro, clip, steps, static, names, images, notes, scene_url, routes=None):
     esc = html.escape
     parts = []
-    # step 0: the kit — everything in the build, counted
-    kit = counted([p for s in steps for p in s["parts"]], names)
-    kit_rows = "".join(f"<tr><td>{n}×</td><td>{esc(name)}</td></tr>" for n, name in kit)
+    # step 0: the kit — everything in the build, counted, grouped by how it is made
+    rows = kit(steps, names, routes)
+    total = sum(r["count"] for r in rows)
+    kit_rows, last = "", None
+    for r in rows:
+        if r["route"] != last:
+            kit_rows += f'<tr class=route><td></td><td>{esc(r["route"])}</td></tr>'
+            last = r["route"]
+        also = f' <small>or {esc(", ".join(r["also"]))}</small>' if r["also"] else ""
+        kit_rows += f'<tr><td>{r["count"]}×</td><td>{esc(r["label"])}{also}</td></tr>'
     fast = sorted({f for s in steps for f in (notes.get("steps", {}).get(s["name"], {}).get("fasteners") or [])})
     tools = sorted({t for s in steps for t in (notes.get("steps", {}).get(s["name"], {}).get("tools") or [])})
     extra = ""
@@ -204,7 +315,7 @@ def build_html(title, intro, clip, steps, static, names, images, notes, scene_ur
     parts.append(f'<section class="step kit on"><h2><small>Before you start</small>{esc(title)}</h2>'
                  f'{("<p class=note>" + esc(intro) + "</p>") if intro else ""}'
                  f'<img src="data:image/png;base64,{images["kit"]}" alt="the finished build">'
-                 f'<div class=lists><div><h3>Parts · {sum(n for n, _ in kit)}</h3><table>{kit_rows}</table></div><div>{extra}</div></div>{ctx_html}</section>')
+                 f'<div class=lists><div><h3>Parts · {total}</h3><table>{kit_rows}</table></div><div>{extra}</div></div>{ctx_html}</section>')
     for k, s in enumerate(steps, 1):
         n = notes.get("steps", {}).get(s["name"], {})
         rows = "".join(f"<li><b>{c}×</b><span>{esc(name)}</span></li>" for c, name in counted(s["parts"], names))
@@ -233,6 +344,7 @@ def main(argv=None):
     ap.add_argument("--notes", help="JSON with title / intro / per-step note, fasteners, tools")
     ap.add_argument("--url", default=os.environ.get("OPENWORKSHOP_URL", "http://127.0.0.1:3941"))
     ap.add_argument("--size", default="900x600", help="picture size WxH (default 900x600)")
+    ap.add_argument("--kit", metavar="DIR", help="also write DIR/kit.json and an STL per part type to print / cut")
     a = ap.parse_args(argv)
     url = a.url.rstrip("/")
     size = tuple(int(x) for x in a.size.lower().split("x"))
@@ -247,7 +359,10 @@ def main(argv=None):
         print(f"step {s['name']}: {len(s['parts'])} part(s)", file=sys.stderr)
     final = dict(steps[-1], camera=None)
     images["kit"] = base64.b64encode(snapshot(url, a.scene, clip, final, placed, [], size)).decode()
-    page = build_html(title, notes.get("intro"), clip, steps, static, names, images, notes, f"{url}/{a.scene}")
+    routes = dict(msg.get("routes") or {}, **(notes.get("routes") or {}))
+    page = build_html(title, notes.get("intro"), clip, steps, static, names, images, notes, f"{url}/{a.scene}", routes)
+    if a.kit:
+        write_kit(a.kit, msg, steps, names, routes)
     out = Path(a.output) if a.output else Path(f"{a.scene}-guide.html")
     out.write_text(page)
     print(f"{out}  {len(steps)} steps, {len(page) / 1e6:.1f} MB")

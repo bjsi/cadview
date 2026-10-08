@@ -108,6 +108,13 @@ and `fasten(screw("M6", 12), t_nut("M6", "3030"), at=…, axis=…, grip=3)`
 puts a screw and its mate on a joint — so the step's list says
 "8 × M6×12 socket screw, 8 × M6 T-nut (3030)" because they are there.
 
+Routes say how each part type gets made:
+`show(..., routes={"MDF top": ["cnc"], "gridfinity bin *": ["print", "buy"]})`,
+several per part with the first as the default (hardware is "buy" by
+itself). The kit page groups the parts by route, and `--kit DIR` writes
+`kit.json` plus an STL per part type to print or cut, straight from the
+scene's mesh — no CAD stack, just the server.
+
 ## With Claude Code
 
 Make the viewer the project's preview server (`.claude/launch.json`) and
