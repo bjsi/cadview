@@ -75,13 +75,25 @@ class GuideTest(unittest.TestCase):
             self.assertFalse((Path(d) / "buy").exists())                                   # nothing to make for bought parts
             self.assertEqual([r["route"] for r in rows if "file" in r], ["cnc", "cut"])
 
+    def test_ids_by_route_and_bag_labels(self):
+        msg = scene()
+        _, steps, _, names = guide.steps_of(msg)
+        rows = guide.kit(steps, names, msg["routes"])
+        self.assertEqual([(r["id"], r["label"]) for r in rows],
+                         [("C1", "top"), ("X1", "leg"), ("B1", "M6×12 socket screw"), ("B2", "M6 T-nut (3030)")])
+        sheet = guide.labels_html("T", rows, steps, names)
+        self.assertIn('<div class=id>X1</div><div class=name>leg</div><div class=meta>×2 · step 1 legs · cut</div>', sheet)
+        self.assertIn('<div class=id>B2</div>', sheet)
+        page = guide.build_html("T", None, "assembly", steps, [], names, {s["name"]: "" for s in steps} | {"kit": ""}, {}, None, msg["routes"])
+        self.assertIn('<span class=id>X1</span>leg', page)                      # on the kit page and the step
+
     def test_build_html_groups_the_kit_by_route(self):
         msg = scene()
         clip, steps, static, names = guide.steps_of(msg)
         images = {s["name"]: "" for s in steps}; images["kit"] = ""
         page = guide.build_html("T", None, clip, steps, static, names, images, {"steps": {"top": {"tools": ["router"]}}}, None, msg["routes"])
         self.assertIn("<tr class=route><td></td><td>cnc</td></tr>", page)
-        self.assertIn("2×</td><td>leg</td>", page)
+        self.assertIn("2×</td><td><span class=id>X1</span>leg</td>", page)
         self.assertIn("<small>or buy</small>", page)
         self.assertIn("Step 2 of 3", page)
         self.assertIn("router", page)

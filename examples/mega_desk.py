@@ -131,8 +131,12 @@ def shelving():
     shelf_z = DESK_TOP + SHELF_H
     shelf_parts = [part(Pos(0, LEG_Y - PROF / 2 - SHELF_D / 2, shelf_z - SHELF_T / 2) * Box(DESK_L - 70, SHELF_D, SHELF_T),
                         "shelf board (MFC)", MDF)]
+    from openworkshop.marks import arrow, engrave
+    arm = Box(28, 220, 12, align=(Align.CENTER, Align.MAX, Align.MAX)) + Box(28, 12, 100, align=(Align.CENTER, Align.MAX, Align.MAX))
+    # the printed part says what it is (its kit ID, P1 = the first printed part type) and which
+    # way it goes (the arrow points at the upright): cut 0.4 mm into the arm's top, under the board
+    arm = arrow(engrave(arm, "P1", size=12, at=(0, 70), rotation=90), (0, 1, 0), size=10, text="WALL", at=(0, 40))
     for x in UPRIGHT_X:
-        arm = Box(28, 220, 12, align=(Align.CENTER, Align.MAX, Align.MAX)) + Box(28, 12, 100, align=(Align.CENTER, Align.MAX, Align.MAX))
         shelf_parts.append(part(Pos(x, LEG_Y - PROF / 2, shelf_z - SHELF_T) * arm, "shelf bracket (printed)", PRINTED))
     for i, x in enumerate((-800, -700, -560, -300, 100, 350)):
         n = 2 if i % 2 else 3

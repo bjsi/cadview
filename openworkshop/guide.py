@@ -1,7 +1,7 @@
 """Build guide — the assembly clip's chapters as IKEA-style step pages.
 
     python -m openworkshop.guide <scene> [-o guide.html] [--clip NAME] [--notes guide.json]
-                                 [--kit DIR] [--url http://127.0.0.1:3941] [--size 900x600]
+                                 [--kit DIR] [--labels FILE] [--url http://127.0.0.1:3941] [--size 900x600]
 
 A clip with chapters is a build order: each chapter is a step, and the parts
 whose tracks change inside the step (a `vis` 0 -> 1, a move that starts) are
@@ -29,6 +29,9 @@ groups the parts by route, and `--kit DIR` writes DIR/kit.json plus an STL
 per part type to print or cut, straight from the scene's mesh. Parts from
 openworkshop.hardware are "buy" unless the routes say otherwise; a part
 with no route is listed as unrouted, which is the question to answer.
+Every part type gets an ID by route in kit order (P1, C1, X1, B1 ...) shown
+on the kit page and the steps; `--labels FILE` prints them as bag labels, and
+openworkshop.marks engraves them on the parts.
 """
 import argparse
 import base64
@@ -49,6 +52,8 @@ HARDWARE_ROUTES = {"M* screw": ["buy"], "M* hex nut": ["buy"], "M* washer": ["bu
                    "M* heat-set insert": ["buy"], "* corner bracket": ["buy", "print"]}
 ROUTE_ORDER = ("print", "cnc", "cut", "laser", "pcb", "buy")
 NO_FILE = ("buy", "context", "unrouted")        # routes the kit writes no geometry for
+ROUTE_LETTER = {"print": "P", "cnc": "C", "cut": "X", "laser": "L", "pcb": "E", "buy": "B", "unrouted": "?"}
+NO_ID = ("context",)                            # not a part anyone handles
 
 _DUP = re.compile(r"(?<! )\(\d+\)$")      # the viewer's duplicate suffix "bracket(2)" -> "bracket"; "M6 T-nut (3030)" is a name
 
@@ -146,7 +151,47 @@ def kit(steps, names, routes):
         rs = route_for(label, routes)
         rows.append({"route": rs[0] if rs else "unrouted", "label": label, "count": n, "also": rs[1:] if rs else []})
     rank = lambda r: (ROUTE_ORDER.index(r["route"]) if r["route"] in ROUTE_ORDER else len(ROUTE_ORDER) + (r["route"] == "unrouted"), r["route"])
-    return sorted(rows, key=rank)
+    rows = sorted(rows, key=rank)
+    # IDs: a letter for the route and a number in kit order — P1 is the first printed part type.
+    # Stable while the model and routes are: engrave it on the part (openworkshop.marks).
+    seq = {}
+    for r in rows:
+        if r["route"] in NO_ID:
+            r["id"] = ""
+            continue
+        letter = ROUTE_LETTER.get(r["route"], r["route"][:1].upper())
+        seq[letter] = seq.get(letter, 0) + 1
+        r["id"] = f"{letter}{seq[letter]}"
+    return rows
+
+
+def labels_html(title, rows, steps, names):
+    """A sheet of bag labels, one per part type: the ID big, the name, the count, the step it
+    goes in, the route. Prints three across; cut along the lines."""
+    esc = html.escape
+    first = {}
+    for k, s in enumerate(steps, 1):
+        for n, label in counted(s["parts"], names):
+            first.setdefault(label, (k, s["name"]))
+    cells = []
+    for r in rows:
+        if not r["id"]:
+            continue
+        k, step = first.get(r["label"], ("", ""))
+        cells.append(f'<div class=label><div class=id>{esc(r["id"])}</div><div class=name>{esc(r["label"])}</div>'
+                     f'<div class=meta>×{r["count"]} · step {k} {esc(step)} · {esc(r["route"])}</div></div>')
+    css = """
+body { margin: 0; font: 14px/1.3 system-ui, sans-serif; color: #1b1f27; }
+h1 { font-size: 16px; margin: 16px; }
+.sheet { display: grid; grid-template-columns: repeat(3, 1fr); }
+.label { border: 1px dashed #9ca3af; padding: 10px 12px; min-height: 70px; break-inside: avoid; }
+.id { font-size: 34px; font-weight: 800; letter-spacing: .02em; line-height: 1; }
+.name { font-size: 15px; font-weight: 600; margin-top: 4px; }
+.meta { color: #6b7280; font-size: 12px; margin-top: 2px; }
+@media print { h1 { display: none; } }
+"""
+    return (f'<!doctype html><html lang="en"><head><meta charset="utf-8"><title>{esc(title)} — bag labels</title><style>{css}</style></head>'
+            f'<body><h1>{esc(title)} — bag labels</h1><div class=sheet>{"".join(cells)}</div></body></html>')
 
 
 def mesh_of(msg, leaf_id):
@@ -265,6 +310,7 @@ section.kit td { padding: 6px 4px; border-top: 1px solid var(--line); }
 section.kit td:first-child { width: 3em; color: var(--accent); font-weight: 700; text-align: right; padding-right: 12px; }
 section.kit tr.route td { border-top: 0; padding-top: 14px; font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
 section.kit td small { color: var(--muted); }
+.id { display: inline-block; min-width: 2.2em; margin-right: 8px; padding: 0 5px; border-radius: 5px; background: var(--ink); color: #fff; font-size: 13px; font-weight: 700; text-align: center; }
 nav { position: fixed; left: 0; right: 0; bottom: 0; display: flex; gap: 10px; padding: 12px 16px calc(12px + env(safe-area-inset-bottom)); background: var(--bg); border-top: 1px solid var(--line); }
 nav button { flex: 1; font: inherit; font-size: 20px; font-weight: 600; padding: 14px; border-radius: 12px; border: 1px solid var(--line); background: #f9fafb; color: var(--ink); }
 nav button.next { background: var(--ink); color: #fff; border-color: var(--ink); }
@@ -302,7 +348,9 @@ def build_html(title, intro, clip, steps, static, names, images, notes, scene_ur
             kit_rows += f'<tr class=route><td></td><td>{esc(r["route"])}</td></tr>'
             last = r["route"]
         also = f' <small>or {esc(", ".join(r["also"]))}</small>' if r["also"] else ""
-        kit_rows += f'<tr><td>{r["count"]}×</td><td>{esc(r["label"])}{also}</td></tr>'
+        pid = f'<span class=id>{esc(r["id"])}</span>' if r["id"] else ""
+        kit_rows += f'<tr><td>{r["count"]}×</td><td>{pid}{esc(r["label"])}{also}</td></tr>'
+    ids = {r["label"]: r["id"] for r in rows}
     fast = sorted({f for s in steps for f in (notes.get("steps", {}).get(s["name"], {}).get("fasteners") or [])})
     tools = sorted({t for s in steps for t in (notes.get("steps", {}).get(s["name"], {}).get("tools") or [])})
     extra = ""
@@ -318,7 +366,8 @@ def build_html(title, intro, clip, steps, static, names, images, notes, scene_ur
                  f'<div class=lists><div><h3>Parts · {total}</h3><table>{kit_rows}</table></div><div>{extra}</div></div>{ctx_html}</section>')
     for k, s in enumerate(steps, 1):
         n = notes.get("steps", {}).get(s["name"], {})
-        rows = "".join(f"<li><b>{c}×</b><span>{esc(name)}</span></li>" for c, name in counted(s["parts"], names))
+        rows = "".join(f"<li><b>{c}×</b><span>{('<span class=id>' + esc(ids[name]) + '</span>') if ids.get(name) else ''}{esc(name)}</span></li>"
+                       for c, name in counted(s["parts"], names))
         fl = "".join(f"<li><span>{esc(f)}</span></li>" for f in (n.get("fasteners") or []))
         tl = "".join(f"<li><span>{esc(t)}</span></li>" for t in (n.get("tools") or []))
         side = (f"<div><h3>Fasteners</h3><ul>{fl}</ul></div>" if fl else "") + (f"<div><h3>Tools</h3><ul>{tl}</ul></div>" if tl else "")
@@ -345,6 +394,7 @@ def main(argv=None):
     ap.add_argument("--url", default=os.environ.get("OPENWORKSHOP_URL", "http://127.0.0.1:3941"))
     ap.add_argument("--size", default="900x600", help="picture size WxH (default 900x600)")
     ap.add_argument("--kit", metavar="DIR", help="also write DIR/kit.json and an STL per part type to print / cut")
+    ap.add_argument("--labels", metavar="FILE", help="also write a printable sheet of bag labels (ID, name, count, step)")
     a = ap.parse_args(argv)
     url = a.url.rstrip("/")
     size = tuple(int(x) for x in a.size.lower().split("x"))
@@ -363,6 +413,9 @@ def main(argv=None):
     page = build_html(title, notes.get("intro"), clip, steps, static, names, images, notes, f"{url}/{a.scene}", routes)
     if a.kit:
         write_kit(a.kit, msg, steps, names, routes)
+    if a.labels:
+        Path(a.labels).write_text(labels_html(title, kit(steps, names, routes), steps, names))
+        print(f"{a.labels}  bag labels")
     out = Path(a.output) if a.output else Path(f"{a.scene}-guide.html")
     out.write_text(page)
     print(f"{out}  {len(steps)} steps, {len(page) / 1e6:.1f} MB")

@@ -115,6 +115,14 @@ itself). The kit page groups the parts by route, and `--kit DIR` writes
 `kit.json` plus an STL per part type to print or cut, straight from the
 scene's mesh — no CAD stack, just the server.
 
+Every part type gets an ID by route in kit order (P1 for the first printed
+part, C1 on the CNC, X1 cut to length, B1 bought), shown on the kit page and
+each step; `--labels FILE` prints them as bag labels. `openworkshop.marks`
+puts them on the parts: `engrave(part, "P1")` cuts the ID into the top
+face, `arrow(part, (0, 1, 0), text="WALL")` cuts a triangle and a word
+pointing the way it goes — geometry, so it prints with the part and shows in
+the viewer. The desk's shelf brackets carry both.
+
 ## With Claude Code
 
 Make the viewer the project's preview server (`.claude/launch.json`) and
